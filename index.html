@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.github.com; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f1f3f2">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14191b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Concierge">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="format-detection" content="telephone=no">
+<title>Concierge</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.mjs"></script>
+</head>
+<body>
+<div id="boot" class="boot" role="status" aria-label="正在打开">
+  <div class="skel skel-top"></div>
+  <div class="skel skel-box"></div>
+  <div class="skel"></div>
+  <div class="skel"></div>
+</div>
+
+<header id="top" class="top" hidden>
+  <a id="brand" class="brand" href="#">Concierge</a>
+  <div class="top-right">
+    <button id="mac" type="button" class="mac" aria-expanded="false" aria-controls="mac-pop"><span class="dot" aria-hidden="true"></span><span id="mac-text">…</span></button>
+    <button id="settings-btn" type="button" class="icon-btn" aria-label="设置">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h9.5M18.5 7H20M4 17h3.5M12.5 17H20"/><circle cx="16" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/></g></svg>
+    </button>
+  </div>
+  <div id="mac-pop" class="pop region" role="dialog" aria-label="Mac 在不在线" hidden></div>
+</header>
+
+<main id="app" hidden>
+  <div id="banner" class="banners region"></div>
+  <div class="cols">
+    <div id="left" class="left">
+      <section class="compose" aria-label="说要什么">
+        <form id="compose-form" autocomplete="off" novalidate>
+          <label class="sr-only" for="want">我要什么 / 哪里不对</label>
+          <textarea id="want" class="want" rows="4" maxlength="8000" placeholder="我要什么 / 哪里不对" enterkeyhint="enter"></textarea>
+          <label class="sr-only" for="extra">额外要求（可选）</label>
+          <input id="extra" class="extra" type="text" maxlength="2000" placeholder="额外要求（可选）" enterkeyhint="done">
+          <div id="chips" class="chips" role="group" aria-label="常用标签"></div>
+          <p id="chips-status" class="note chips-status" role="status"></p>
+          <div class="prefs-row">
+            <button id="prefs-open" type="button" class="prefs-open" aria-expanded="false" aria-controls="prefs-panel"><span id="prefs-summary">执行偏好：自动</span><span class="chev" aria-hidden="true">›</span></button>
+            <button id="prefs-reset" type="button" class="btn btn-quiet prefs-reset" hidden>恢复自动</button>
+            <button id="submit" type="submit" class="btn btn-primary submit">交给它</button>
+          </div>
+          <p id="compose-status" class="status compose-status" role="status"></p>
+          <div id="prefs-backdrop" class="backdrop" hidden></div>
+          <div id="prefs-panel" class="sheet prefs-panel" role="dialog" aria-label="执行偏好" hidden></div>
+        </form>
+      </section>
+      <section class="resources" aria-labelledby="h-res">
+        <h2 id="h-res" class="sec-title">资源</h2>
+        <div id="quota" class="quota region"></div>
+      </section>
+    </div>
+    <div class="right">
+      <section aria-label="任务" class="tasks">
+        <div id="tasklist" class="region"></div>
+      </section>
+      <section id="taskpage" class="taskpage region" aria-label="任务详情" tabindex="-1" hidden></section>
+    </div>
+  </div>
+</main>
+
+<div id="settings-backdrop" class="backdrop backdrop-settings" hidden></div>
+<section id="settings" class="settings region" aria-label="设置" tabindex="-1" hidden></section>
+<div id="menu-backdrop" class="backdrop" hidden></div>
+<div id="chip-menu" class="sheet menu" role="menu" aria-label="整理标签" hidden></div>
+<section id="pair" class="pair region" hidden></section>
+</body>
+</html>
