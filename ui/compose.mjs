@@ -1,15 +1,16 @@
-// ① 说要什么：输入框、额外要求、常用标签、执行偏好、「交给它」。
+// ① 说要什么：输入框、额外要求、常用标签、执行偏好、「提交任务」（先确认，确认了才送出）。
 // 输入框本身写在 index.html 里（首屏就有），这里只接事件、画标签和偏好面板。
 import { h, clear } from '../lib/dom.mjs';
 import * as C from '../lib/choices.mjs';
 import * as F from '../lib/format.mjs';
-import { button } from './common.mjs';
+import { button, rows } from './common.mjs';
 
 const $ = (id) => document.getElementById(id);
 const LONG_PRESS_MS = 500;
-const SUB_NOTE = '0 是硬限制。1、2 是写给会话的要求，实际用了几个会在结果里如实显示。';
+const SUB_NOTE = '自动：一般不开，分诊认为有并行价值时才开。0 是硬限制；1、2 是写给会话的要求，实际用了几个会在结果里如实显示。';
 const CODEX_NOTE = '模型和 effort 由 Concierge 指定，结果里会核对实际值。';
-const GPTWEB_NOTE = '模型和思考档位在 ChatGPT 里由你自己选，Concierge 不能强制也核实不了。提交后到 ChatGPT 说一句“看 <任务号>”。';
+const CLAUDE_CONSULT_NOTE = '模型和 effort 由 Concierge 指定；Claude 的日志核对不了实际档位，结果里写“已请求”。';
+const GPTWEB_NOTE = '模型和思考档位在 ChatGPT 里由你自己选，Concierge 不能强制也核实不了。提交后到连着 Engineering Bridge 的那个 ChatGPT 对话里说一句“看 <任务号>”；普通的 ChatGPT 对话读不到任务。';
 
 export function mountCompose(app) {
   const want = $('want');
@@ -115,6 +116,8 @@ export function mountCompose(app) {
     return h('fieldset', { class: ['group', cls] },
       h('legend', { text: legend }),
       h('div', { class: 'choices' }, items.map((it) => {
+        // 分组的小标题（主执行模型按 Claude / GPT（Codex）分开）
+        if (it.heading) return h('p', { class: 'choice-group', text: it.heading });
         const id = `${name}-${it.value ?? 'auto'}`;
         const input = h('input', { type: 'radio', name, id, checked: it.value === current, disabled: !!it.disabled, attrs: { 'data-k': id } });
         input.addEventListener('change', () => { if (input.checked) onPick(it.value); });
@@ -128,7 +131,10 @@ export function mountCompose(app) {
     const focusKey = panel.contains(document.activeElement) ? document.activeElement.getAttribute('data-k') : null;
     const o = options || { models: [], consult: [] };
     const verified = (at) => (at ? `上次实测 ${F.day(at)}` : '按配置，还没实测过');
-    const models = [{ value: null, label: '自动', sub: '不指定，用命令行默认的模型' }, ...(o.models || []).map((m) => ({ value: m.id, label: m.name, sub: verified(m.verifiedAt) }))];
+    // 主执行模型：Claude 和 GPT（Codex）都列（同一份登记），按命令行分组；每个只带它原生的 effort
+    const groups = C.modelGroups(o);
+    const models = [{ value: null, label: '自动', sub: C.autoModelText(o).replace(/^自动：/, '') },
+      ...groups.flatMap((g) => [...(groups.length > 1 ? [{ heading: g.label }] : []), ...g.models.map((m) => ({ value: m.id, label: m.name, sub: C.modelSub(m) }))])];
     const efforts = C.effortChoices(o, prefs.model);
     const subs = C.subagentChoices(o);
     const consults = o.consult || [];
@@ -150,10 +156,10 @@ export function mountCompose(app) {
         }, { cls: 'is-inline', note: c.mode === 'auto' ? '自动：分诊觉得值得第二个模型看一眼时咨询 1 次，否则不咨询。' : null }),
         c.mode === 'named' ? radios('p-target', '咨询谁', [
           ...consults.map((x) => {
-            if (!x.async) return { value: C.consultKey(x), label: x.label, sub: `${CODEX_NOTE}${x.verifiedAt ? ` ${verified(x.verifiedAt)}。` : ''}` };
+            if (!x.async) return { value: C.consultKey(x), label: x.label, sub: `${C.providerOf(x) === 'claude' && x.target !== 'codex' ? CLAUDE_CONSULT_NOTE : CODEX_NOTE}${x.verifiedAt ? ` ${verified(x.verifiedAt)}。` : ''}` };
             // GPT Web 协调者：只写能观测到的连接事实（上次被调用的时间、隧道在不在跑）；还没接通就不能选
             const st = F.coordinatorStatus(x);
-            return { value: C.consultKey(x), label: x.label, sub: st.connected ? `${st.text}。${GPTWEB_NOTE}` : `${st.text}：Mac 上还没有看到它连过来，现在选了也没人看。`, disabled: !st.connected };
+            return { value: C.consultKey(x), label: x.label, sub: st.connected ? `${st.text}。${GPTWEB_NOTE}` : `${st.text}。现在选了也没人看。`, disabled: !st.connected };
           }),
           ...(asyncOpt ? [] : [{ value: '__gptweb', label: 'GPT Web 协调者', sub: '还没接通：Mac 上没有开 Engineering Bridge。', disabled: true }]),
         ], c.key, (v) => setPrefs({ ...prefs, consult: { ...c, key: v, effort: null, max: 1, smallWork: false } })) : null,
@@ -196,16 +202,43 @@ export function mountCompose(app) {
     if (open) renderPanel();
   }
 
-  // ---- 交给它 ----
-  async function onSubmit(e) {
+  // ---- 提交任务：先确认，确认了才送出 ----
+  // 确认框列出这次要送出去的全部内容（原话、额外要求、每一项执行偏好，自动的也写明是自动）。
+  // 确认之前不调 transport、不建任务；「返回修改」什么都不动；快捷键也走这里；一次确认只送一次（送出中、确认框开着时再按都不算）
+  let review = null;
+  function onSubmit(e) {
     e?.preventDefault?.();
+    if (sending || review) return;
+    if (!want.value.trim()) { say('先写一句你要什么，或者哪里不对。', 'error'); want.focus(); return; }
+    const payload = { want: want.value.trim(), extra: extra.value.trim(), prefs: C.toPayload(prefs, options), chips: C.activeChips(options?.chips || [], prefs, extra.value) };
+    const shownPrefs = JSON.stringify(payload.prefs);
+    const dialog = h('dialog', { class: 'submit-review', attrs: { 'aria-labelledby': 'review-title' } });
+    review = dialog;
+    let done = false;
+    const close = () => { if (done) return; done = true; if (dialog.open) dialog.close(); dialog.remove(); review = null; };
+    const back = button('返回修改', () => { close(); want.focus(); });
+    const confirm = button('确认提交', () => {
+      if (done || sending) return;
+      // 确认框开着的时候 Mac 那边的可选项变了（比如模型重新实测过），这一次的偏好可能已经不是她看到的：不送，请她再看一眼
+      if (JSON.stringify(C.toPayload(prefs, options)) !== shownPrefs) { close(); say('可选的执行偏好刚刚变了，再确认一次。', 'error'); submit.focus(); return; }
+      close(); submit.focus(); send(payload);
+    }, { primary: true });
+    dialog.append(
+      h('h2', { class: 'review-title', id: 'review-title', text: '确认提交这个任务' }),
+      rows([['需求', payload.want], ['额外要求', payload.extra || '没有'], ...C.reviewRows(prefs, options)]),
+      h('p', { class: 'note', text: '“自动”的那几项提交之后由 Concierge 分诊决定，定下来的方案会写在任务页的「执行方案」里。确认之后才会建任务。' }),
+      h('div', { class: 'review-actions' }, back, confirm));
+    dialog.addEventListener('cancel', (ev) => { ev.preventDefault(); close(); want.focus(); });
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+  async function send(payload) {
     if (sending) return;
-    const w = want.value.trim();
+    const w = payload.want;
     if (!w) { say('先写一句你要什么，或者哪里不对。', 'error'); want.focus(); return; }
     sending = true; submit.disabled = true; say('正在送出…'); hint = null;
     const before = (app.view?.tasks || []).map((t) => t.ref);
     try {
-      const payload = { want: w, extra: extra.value.trim(), prefs: C.toPayload(prefs, options), chips: C.activeChips(options?.chips || [], prefs, extra.value) };
       const r = await app.transport.submit(payload);
       if (r && r.ok === false) {
         // 没送出去而且不会自动重试（比如令牌没权限）：写的东西留在输入框里
@@ -227,7 +260,7 @@ export function mountCompose(app) {
     } finally { sending = false; submit.disabled = false; }
   }
   $('compose-form').addEventListener('submit', onSubmit);
-  // 桌面上 ⌘/Ctrl + Enter 直接交
+  // 快捷键同样先确认
   want.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSubmit(e); });
 
   grow();

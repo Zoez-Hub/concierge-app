@@ -37,6 +37,7 @@
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h9.5M18.5 7H20M4 17h3.5M12.5 17H20"/><circle cx="16" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/></g></svg>
     </button>
   </div>
+  <p id="receiver-line" class="receiver-line" role="status"></p>
   <div id="mac-pop" class="pop region" role="dialog" aria-label="Mac 在不在线" hidden></div>
 </header>
 
@@ -55,8 +56,8 @@
           <div class="prefs-row">
             <button id="prefs-open" type="button" class="prefs-open" aria-expanded="false" aria-controls="prefs-panel"><span id="prefs-summary">执行偏好：自动</span><span class="chev" aria-hidden="true">›</span></button>
             <button id="prefs-reset" type="button" class="btn btn-quiet prefs-reset" hidden>恢复自动</button>
-            <button id="submit" type="submit" class="btn btn-primary submit">交给它</button>
           </div>
+          <div class="submit-row"><button id="submit" type="submit" class="btn btn-primary submit">提交任务</button></div>
           <p id="compose-status" class="status compose-status" role="status"></p>
           <div id="prefs-backdrop" class="backdrop" hidden></div>
           <div id="prefs-panel" class="sheet prefs-panel" role="dialog" aria-label="执行偏好" hidden></div>

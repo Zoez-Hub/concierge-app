@@ -1,4 +1,4 @@
-// 设置（⚙）：这台设备 / 设备（只在 Mac 本机页面）/ 可用模型 / 关于。
+// 设置（⚙）：这台设备 / 设备（只在 Mac 本机页面）/ 可用模型 / Windows 接收器 / 关于。
 // 「添加设备」：Mac 上的 Concierge 给一次性配对密钥和 Mac 公钥，页面在浏览器里拼出配对链接（带 m）并画成二维码。
 // 可选的令牌只留在这个页面的内存里：不发给 Concierge 的服务，不写进任何存储；关掉面板就清掉。
 // 「输入设备上显示的配对码」：设备上显示 12 位码，Zoe 敲进来（docs/REMOTE.md §3.1）。没有待批准列表。
@@ -8,8 +8,9 @@ import * as F from '../lib/format.mjs';
 import { encodePairFragment, normalizePairingCode } from '../lib/proto.mjs';
 import qrcode from '../vendor/qrcode-generator-2.0.4.mjs';
 import { rows, section, button, statusLine, latest } from './common.mjs';
+import { BUILD } from '../build.mjs';
+import * as C from '../lib/choices.mjs';
 
-export const PAGE_VERSION = '2 · 2026-10-02';
 
 // 只在内存里的配对状态（不进任何存储）
 const pair = { form: false, label: 'iPhone', token: '', url: null, expiresAt: null, withToken: false, error: null, busy: false, startDevices: null };
@@ -167,7 +168,8 @@ function addDevice(app, list) {
 function modelsSection(app) {
   const o = app.view?.board?.options || {};
   const list = [
-    ...(o.models || []).map((m) => [m.name, m.verifiedAt ? `上次实测 ${F.day(m.verifiedAt)}` : '按配置，还没实测过']),
+    // 主执行模型：Claude 和 GPT（Codex）都在这里，写明是哪个命令行、能不能在 Windows 上跑
+    ...(o.models || []).map((m) => [m.name, [C.PROVIDER_LABEL[C.providerOf(m)], C.modelSub(m)].join(' · ')]),
     ...(o.consult || []).map((c) => [c.label, c.async ? `Concierge 测不了（在 ChatGPT 里由你自己选）· ${F.coordinatorStatus(c).text}` : c.verifiedAt ? `上次实测 ${F.day(c.verifiedAt)}` : '按配置，还没实测过']),
     ...(o.smallWork ? [['小动工 · Luna', o.smallWork.available ? `能用（${o.smallWork.model || 'gpt-5.6-luna'}）` : `暂时不能用：${o.smallWork.note || '原因不明'}`]] : []),
   ];
@@ -179,17 +181,33 @@ function modelsSection(app) {
     act && act.state === 'done' ? h('p', { class: 'status', attrs: { role: 'status' }, text: '已开始重测：在后台一个一个测，测完这里的日期会更新。' }) : statusLine(act, { online: app.macOnline(), app }));
 }
 
+// Windows 接收器（board.receivers）：编号、钥匙编号（和 Windows 上 pin 打印的对）、版本、自动启动、上一轮的错误类别
+function receiversSection(app) {
+  const list = Array.isArray(app.view?.board?.receivers) ? app.view.board.receivers : [];
+  if (!list.length) {
+    return section('Windows 接收器',
+      // 页面里不写仓库名（托管副本是公开的）：只说 C:\Projects 下工程总仓库里的 _tools 文件夹
+      h('p', { text: '还没有接入。在 Windows 上打开 C:\\Projects 下工程总仓库里的 _tools 文件夹，双击 receiver-setup.cmd：它会钉住 Mac 的钥匙、装好自动启动；接收器开始发心跳之后这里就有了。' }));
+  }
+  return section('Windows 接收器',
+    ...list.map((r) => rows(F.receiverRows(r))),
+    h('p', { class: 'note', text: '钥匙编号要和 Windows 上 receiver-setup.cmd（或 receiver.cmd pin）打印的「接收器钥匙编号」一样；对不上就是有别人抢先冒充了这台接收器。Mac 只认一台接收器：要换（或者清掉冒充的），得在 Mac 上有人值守地处理。在线＝最近 5 分钟里收到过它签名的心跳。' }));
+}
+
 function about(app) {
   const b = app.view?.board || {};
-  const list = [['页面版本', PAGE_VERSION], ['Concierge 版本', b.mac?.version || '不知道'], ['Mac 最近在线', b.mac?.seenAt ? F.dayTime(b.mac.seenAt) : '不知道']];
+  // 页面、Mac 入口、Windows 接收器各是哪份代码；页面和入口对不上时说一句
+  const ver = F.versionRows(b, BUILD, { local: app.local });
+  const list = [...ver.rows, ['Mac 最近在线', b.mac?.seenAt ? F.dayTime(b.mac.seenAt) : '不知道']];
+  const mismatch = ver.note ? h('p', { class: 'note is-warn', attrs: { id: 'version-note' }, text: ver.note }) : null;
   if (app.local) {
     const r = app.devices?.remote;
     list.push(['远端发布', !r ? '正在读取…' : !r.enabled ? '没有开启' : r.lastError ? '上一轮出错了（原因在下面）' : r.lastPublishAt ? `${F.dayTime(r.lastPublishAt)} 发布过` : '还没发布过']);
     if (r?.enabled && app.devices?.mac?.id) list.push(['Mac 钥匙编号', app.devices.mac.id]);
     // 出错的原文是给工程看的（可能带工程说法），折起来放
-    return section('关于', rows(list), r?.enabled && r.lastError ? h('details', { class: 'help' }, h('summary', { text: '工程上的原因' }), h('p', { text: String(r.lastError) })) : null);
+    return section('关于', rows(list), mismatch, r?.enabled && r.lastError ? h('details', { class: 'help' }, h('summary', { text: '工程上的原因' }), h('p', { text: String(r.lastError) })) : null);
   } else list.push(['看板更新于', b.at ? F.dayTime(b.at) : '不知道']);
-  return section('关于', rows(list));
+  return section('关于', rows(list), mismatch);
 }
 
 export function renderSettings(app) {
@@ -198,6 +216,7 @@ export function renderSettings(app) {
     thisDevice(app),
     app.transport.capabilities.devices ? devicesSection(app) : null,
     modelsSection(app),
+    receiversSection(app),
     about(app),
   ].filter(Boolean);
 }

@@ -41,8 +41,8 @@ const DONE_KEEP_MS = 10 * 60000;
 const FAILED_KEEP_MS = 24 * 3600000;
 const MAX_PAGES = 10;
 const MAX_CACHE = 200;
-const TASK_KINDS = ['answer', 'resume', 'consult'];
-const STATES = ['queued', 'working', 'needs_zoe', 'done', 'handed_off', 'stalled'];
+const TASK_KINDS = ['answer', 'resume', 'consult', 'cancel'];
+const STATES = ['queued', 'working', 'needs_zoe', 'done', 'handed_off', 'stalled', 'paused', 'cancelled'];
 const REF = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}#[1-9][0-9]{0,8}$/;
 
 export class GhError extends Error {
@@ -699,6 +699,8 @@ export function makeGithubTransport({
       return command('answer', { ref: t.ref, decisionFp: String(t.decision?.fp || ''), choice: String(choice), text: String(text) }, { text: choice || text }, t);
     },
     resume: (t) => command('resume', { ref: t.ref }, {}, t),
+    // 取消这个任务：和继续一样带卡片指纹（对着她看到的那张卡片取消）
+    cancel: (t, { text = '' } = {}) => command('cancel', { ref: t.ref, text: String(text || '') }, {}, t),
     consult: (t, { question = '', smallWork = false }) => command('consult', { ref: t.ref, question: String(question), smallWork: smallWork === true }, {}, t),
     chip: (action, text) => command('chip', { action, text: String(text) }, { text }),
     probeQuota: (pool) => command('quota', { pool }, { text: pool }),

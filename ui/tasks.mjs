@@ -1,8 +1,10 @@
-// ③ 任务列表：刚送出的 → 等你决定（有才显示，最上，醒目）→ 正在处理 → 完成（最近 5 条 + 更多）。
-// 每一条两行：她说的那句话（截断）；状态 + 谁在做。
+// ③ 任务列表：刚送出的 → 等你决定（有才显示，最上，醒目，每一条直接带完整的决定卡片）→ 正在处理（含暂停）→ 完成（最近 5 条 + 更多）
+// → 已取消 / 已结束（折起来，不算完成）。
+// 每一条两行：她说的那句话（截断）；状态 + 谁在做（在做的优先写最新一句进展和时间）。
 import { h } from '../lib/dom.mjs';
 import * as F from '../lib/format.mjs';
 import { button } from './common.mjs';
+import { decisionCard } from './decision.mjs';
 
 const firstLine = (s) => String(s || '').trim().split('\n')[0];
 
@@ -46,13 +48,19 @@ function pendingRows(app, view, outbox) {
 
 export function renderTaskList(app, view, ordered, outbox) {
   const options = view?.board?.options || null;
-  const { needs, active, done } = F.groupTasks(ordered);
+  const { needs, active, done, cancelled } = F.groupTasks(ordered);
   const pend = pendingRows(app, view, outbox);
   const out = [];
   if (pend.length) out.push(h('section', { class: 'group-sec', attrs: { 'aria-label': '刚送出' } }, h('h2', { class: 'group-title', text: '刚送出' }), h('ul', { class: 'tasklist' }, pend)));
   if (needs.length) {
     out.push(h('section', { class: 'group-sec is-needs' }, h('h2', { class: 'group-title' }, '等你决定', h('span', { class: 'count', text: String(needs.length) })),
-      h('ul', { class: 'tasklist' }, needs.map((t) => row(app, t, options)))));
+      // 每一条：任务那一行（点进去看详情）+ 完整的决定卡片（在这里就能答）
+      h('ul', { class: 'tasklist needs-list' }, needs.map((t) => {
+        const li = row(app, t, options);
+        li.classList.add('needs-item');
+        li.append(decisionCard(app, t, { where: 'home' }));
+        return li;
+      }))));
   }
   out.push(h('section', { class: 'group-sec' }, h('h2', { class: 'group-title' }, '正在处理', active.length ? h('span', { class: 'count', text: String(active.length) }) : null),
     active.length ? h('ul', { class: 'tasklist' }, active.map((t) => row(app, t, options))) : h('p', { class: 'empty', text: '现在没有在处理的任务。' })));
@@ -60,6 +68,15 @@ export function renderTaskList(app, view, ordered, outbox) {
   out.push(h('section', { class: 'group-sec' }, h('h2', { class: 'group-title', text: '完成' }),
     done.length ? h('ul', { class: 'tasklist' }, shown.map((t) => row(app, t, options))) : h('p', { class: 'empty', text: '还没有完成的任务。' }),
     done.length > F.DONE_SHOWN ? button(app.ui.doneAll ? '收起' : `更多（还有 ${done.length - F.DONE_SHOWN} 条）`, () => { app.ui.doneAll = !app.ui.doneAll; app.render(); }, { cls: 'btn-quiet more' }) : null));
-  if (!ordered.length && !pend.length) out.unshift(h('p', { class: 'empty lead', text: '还没有任务。在上面写一句你要什么，交给它。' }));
+  // 已取消 / 按她的决定结束的：不算完成，折起来放在最后
+  if (cancelled.length) {
+    const d = h('details', { class: 'group-sec cancelled-sec' },
+      h('summary', { class: 'group-title' }, '已取消 / 已结束', h('span', { class: 'count', text: String(cancelled.length) })),
+      h('ul', { class: 'tasklist' }, cancelled.map((t) => row(app, t, options))));
+    d.open = !!app.ui.cancelledOpen;
+    d.addEventListener('toggle', () => { app.ui.cancelledOpen = d.open; });
+    out.push(d);
+  }
+  if (!ordered.length && !pend.length) out.unshift(h('p', { class: 'empty lead', text: '还没有任务。在上面写一句你要什么，提交就行。' }));
   return out;
 }

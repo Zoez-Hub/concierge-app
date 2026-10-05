@@ -78,6 +78,8 @@ export function makeLocalTransport({ fetch = globalThis.fetch.bind(globalThis), 
     },
     answer: (t, { choice, text }) => act('answer', { ref: t.ref, fp: t.decision?.fp, text: choice || text }, () => call('POST', 'api/answer', { ref: t.ref, choice, text, decisionFp: t.decision?.fp })),
     resume: (t) => act('resume', { ref: t.ref }, () => call('POST', 'api/resume', { ref: t.ref })),
+    // 取消这个任务（不算完成）。text：她补的一句原因（可以空）
+    cancel: (t, { text = '' } = {}) => act('cancel', { ref: t.ref }, () => call('POST', 'api/cancel', { ref: t.ref, text: String(text || '') })),
     consult: (t, { question, smallWork }) => act('consult', { ref: t.ref }, () => call('POST', 'api/consult', { ref: t.ref, question, smallWork: smallWork === true })),
     chip: (action, text) => act('chip', { text }, () => call('POST', 'api/chips', { action, text })),
     probeQuota: (pool) => act('quota', { text: pool }, () => call('POST', 'api/quota/probe', { pool })),

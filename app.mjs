@@ -31,13 +31,17 @@ if (pairFragBad) pairFrag = null;
 
 const $ = (id) => document.getElementById(id);
 const POLL_MS = 10000;
+// 本机页面上有任务在动（排队、正在做、刚提交还没变成任务）时轮询快一点：状态自己从领取走到完成，不用她刷新
+const POLL_BUSY_MS = 4000;
+const busy = () => (app.view?.tasks || []).some((t) => t.state === 'queued' || t.state === 'working')
+  || (app.view?.board?.pending || []).length > 0 || app.outbox.length > 0;
 
 const app = {
   transport: null, local: false, store: null,
   view: null, ordered: [], actions: [], outbox: [], devices: null,
   error: null, flashText: null, chipNote: null,
   route: F.routeOf(location.hash),
-  ui: { quotaOpen: new Set(), doneAll: false, drafts: new Map(), consultOpen: null, macPop: false },
+  ui: { quotaOpen: new Set(), doneAll: false, drafts: new Map(), consultOpen: null, macPop: false, reportOpen: new Set(), cancelledOpen: false },
   pair: { step: 'start' },
   defaultLabel: F.guessLabel(navigator.userAgent, navigator.platform),
   copy: copyText,
@@ -158,6 +162,10 @@ function render() {
   $('mac').setAttribute('aria-expanded', app.ui.macPop ? 'true' : 'false');
   paint($('mac-pop'), JSON.stringify([app.ui.macPop, ms, latest(app.actions, (a) => a.kind === 'ping'), minute()]), () => macPop(ms));
   $('mac-pop').hidden = !app.ui.macPop;
+  // 页头第二行：Windows 接收器在不在线（看板里 Mac 验过签的心跳；没有证据不写在线）
+  const rs = F.receiverStatus(board);
+  $('receiver-line').textContent = rs ? rs.text : '';
+  $('receiver-line').classList.toggle('is-online', !!rs?.online);
 
   // 横幅：读不到最新状态、设备被移除、有内容没通过签名校验、加到主屏幕
   const rst = app.local ? null : app.transport.status();
@@ -169,7 +177,8 @@ function render() {
     : ca && ca.state === 'failed' ? `标签没改成：${ca.error}` : '';
 
   paint($('quota'), JSON.stringify([board?.quota, [...app.ui.quotaOpen], app.actions.filter((a) => a.kind === 'quota'), minute(), !!view]), () => (view ? renderQuota(app, board?.quota, app.actions) : skeleton(3)));
-  paint($('tasklist'), JSON.stringify([app.ordered, app.outbox, board?.pending, app.ui.doneAll, minute(), !!view, app.macOnline()]), () => (view ? renderTaskList(app, view, app.ordered, app.outbox) : skeleton(4)));
+  // 首页「等你决定」里有完整的决定卡片：回答的动作状态变了也要重画
+  paint($('tasklist'), JSON.stringify([app.ordered, app.outbox, board?.pending, app.ui.doneAll, minute(), !!view, app.macOnline(), app.actions.filter((a) => a.kind === 'answer'), app.ui.cancelledOpen]), () => (view ? renderTaskList(app, view, app.ordered, app.outbox) : skeleton(4)));
 
   const r = app.route;
   document.body.classList.toggle('has-task', r.name === 'task');
@@ -183,9 +192,9 @@ function render() {
   $('tasklist').inert = r.name === 'task' || r.name === 'settings';
   if (r.name === 'task') {
     const t = app.ordered.find((x) => x.ref === r.ref) || null;
-    paint($('taskpage'), JSON.stringify([t, app.actions.filter((a) => a.ref === r.ref), app.ui.consultOpen, app.macOnline(), minute(), !!view, board?.options?.smallWork]), () => renderTaskPage(app, t));
+    paint($('taskpage'), JSON.stringify([t, app.actions.filter((a) => a.ref === r.ref), app.ui.consultOpen, app.macOnline(), minute(), !!view, board?.options?.smallWork, board?.options?.consult]), () => renderTaskPage(app, t));
   }
-  if (r.name === 'settings') paint($('settings'), JSON.stringify([board?.options, board?.mac, board?.at, app.devices, app.actions.filter((a) => a.kind === 'caps'), app.settingsTick || 0, app.local ? null : app.transport.status().device]), () => renderSettings(app));
+  if (r.name === 'settings') paint($('settings'), JSON.stringify([board?.options, board?.mac, board?.at, board?.receivers, minute(), app.devices, app.actions.filter((a) => a.kind === 'caps'), app.settingsTick || 0, app.local ? null : app.transport.status().device]), () => renderSettings(app));
 }
 app.render = () => { if (app.route.name === 'settings') app.settingsTick = (app.settingsTick || 0) + 1; render(); };
 
@@ -295,19 +304,26 @@ app.pairCode = async (f) => {
   tick();
 };
 
-// ---- 轮询：页面可见时每 10 秒；不可见时停；回到前台立刻刷新一次 ----
+// ---- 轮询：页面可见时每 10 秒（本机有任务在动时每 4 秒）；不可见时停；回到前台立刻刷新一次 ----
+// 一轮里任何一步出错（包括画页面）都不能让轮询停下：否则页面停在旧状态，只有手动刷新才会变
 
 async function tick() {
   clearTimeout(timer); timer = null;
   if (document.hidden) return;
-  try { await app.transport.refresh(); app.error = null; } catch (e) { app.error = e.message || '出错了'; }
-  app.view = app.transport.view();
-  app.actions = await app.transport.actions();
-  app.outbox = await app.transport.outbox();
-  if (!entered && app.transport.status().paired) await enter();
-  if (entered && app.route.name === 'settings' && app.local) await app.loadDevices();
-  render();
-  if (!document.hidden) timer = setTimeout(tick, POLL_MS);
+  try {
+    try { await app.transport.refresh(); app.error = null; } catch (e) { app.error = e.message || '出错了'; }
+    app.view = app.transport.view();
+    app.actions = await app.transport.actions();
+    app.outbox = await app.transport.outbox();
+    if (!entered && app.transport.status().paired) await enter();
+    if (entered && app.route.name === 'settings' && app.local) await app.loadDevices();
+    render();
+  } catch (e) {
+    console.warn('这一轮更新没画完，下一轮再试：', e);
+  } finally {
+    clearTimeout(timer);
+    if (!document.hidden) timer = setTimeout(tick, app.local && busy() ? POLL_BUSY_MS : POLL_MS);
+  }
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(timer); timer = null; } else tick(); });
 window.addEventListener('online', () => tick());

@@ -23,6 +23,7 @@
   --radius-s: 10px;
   --gutter: 16px;
   --top-h: 56px;
+  --rcv-h: 22px;   /* 页头第二行：Windows 接收器在不在线 */
   --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   color-scheme: light dark;
 }
@@ -97,13 +98,18 @@ button, input, textarea, select { font: inherit; color: inherit; }
 /* ---------- 页头 ---------- */
 .top {
   position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 12px; row-gap: 0;
   padding: env(safe-area-inset-top) max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
-  min-height: calc(var(--top-h) + env(safe-area-inset-top));
+  min-height: calc(var(--top-h) + var(--rcv-h) + env(safe-area-inset-top));
   background: var(--bg); border-bottom: 1px solid var(--line-2);
 }
 .brand { font-size: 18px; font-weight: 650; letter-spacing: 0.01em; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
 .top-right { display: flex; align-items: center; gap: 4px; }
+.receiver-line {
+  flex-basis: 100%; margin: 0; min-height: var(--rcv-h); line-height: var(--rcv-h); padding-bottom: 4px;
+  font-size: 13px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.receiver-line.is-online { color: var(--ink-2); }
 .mac {
   min-height: 44px; padding: 0 12px; border-radius: 999px; border: 1px solid transparent; background: transparent;
   color: var(--ink-2); font-size: 14px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap;
@@ -128,7 +134,7 @@ main { padding: 0 max(var(--gutter), env(safe-area-inset-right)) calc(env(safe-a
 @media (min-width: 1040px) {
   .cols { max-width: 1200px; grid-template-columns: 420px minmax(0, 1fr); gap: 48px; }
   .right { padding-top: 18px; }
-  .left { position: sticky; top: calc(var(--top-h) + 1px); max-height: calc(100vh - var(--top-h)); overflow-y: auto; padding-bottom: 24px; scrollbar-width: thin; }
+  .left { position: sticky; top: calc(var(--top-h) + var(--rcv-h) + 1px); max-height: calc(100vh - var(--top-h) - var(--rcv-h)); overflow-y: auto; padding-bottom: 24px; scrollbar-width: thin; }
 }
 .sec-title, .group-title { font-size: 14px; font-weight: 600; color: var(--ink-3); margin: 0 2px 8px; display: flex; align-items: center; gap: 8px; }
 .banners { max-width: 1200px; margin: 0 auto; display: grid; gap: 8px; }
@@ -192,7 +198,9 @@ main { padding: 0 max(var(--gutter), env(safe-area-inset-right)) calc(env(safe-a
 .prefs-open:hover { color: var(--ink); }
 .prefs-open .chev { color: var(--ink-3); font-size: 18px; line-height: 1; }
 .prefs-open[aria-expanded="true"] .chev { transform: rotate(90deg); }
-.submit { min-width: 112px; min-height: 48px; font-size: 16px; margin-left: auto; }
+.submit-row { display: flex; justify-content: flex-end; }
+.submit { min-width: 112px; min-height: 48px; font-size: 16px; }
+@media (max-width: 1039.98px) { .submit { width: 100%; } }
 .compose-status:empty { display: none; }
 
 .status { font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
@@ -246,6 +254,27 @@ main { padding: 0 max(var(--gutter), env(safe-area-inset-right)) calc(env(safe-a
 .menu { gap: 8px; }
 .menu-title { font-weight: 600; padding: 0 4px 4px; }
 .menu .btn { width: 100%; }
+
+/* 「提交任务」的确认框（<dialog>，showModal）：手机上从底部升起，桌面上居中。表格和按钮沿用现有样式 */
+.submit-review {
+  width: min(560px, calc(100vw - 2 * var(--gutter))); max-width: none; max-height: min(86vh, 720px); max-height: min(86dvh, 720px);
+  margin: auto; padding: 20px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.submit-review[open] { display: grid; gap: 16px; align-content: start; }
+.submit-review::backdrop { background: rgba(18, 24, 26, 0.45); }
+.review-title { font-size: 17px; }
+.review-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 1039.98px) {
+  .submit-review {
+    width: 100%; margin: auto 0 0; border-radius: 18px 18px 0 0; border-width: 1px 0 0;
+    padding: 18px max(var(--gutter), env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 16px) max(var(--gutter), env(safe-area-inset-left));
+  }
+  .review-actions .btn { flex: 1 1 0; min-height: 48px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .submit-review[open] { animation: rise 0.22s ease-out; }
+}
 
 /* ---------- ② 资源 ---------- */
 .quota { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
@@ -306,9 +335,13 @@ a.task:hover { background: var(--bg); }
 .tp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; }
 .back { padding-left: 4px; margin-left: -4px; font-size: 16px; }
 .tp-ref { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tp-meta { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.tp-fresh { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 12px; min-width: 0; }
 .block-title { font-size: 14px; font-weight: 600; color: var(--ink-3); }
 .said { background: transparent; border: 0; padding: 4px 2px 6px; }
+.result .report { font-size: 16px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.result.is-unmet .block-title { color: var(--danger); }
 .tp-want { font-size: 20px; line-height: 1.45; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tp-extra { display: grid; gap: 2px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tp-source { font-size: 13.5px; color: var(--ink-3); }
@@ -331,6 +364,41 @@ a.task:hover { background: var(--bg); }
 .eng > .rows, .eng > .note { padding: 0 16px 16px; }
 .eng a { color: var(--ink); text-underline-offset: 3px; overflow-wrap: anywhere; display: inline-flex; align-items: center; min-height: 44px; }
 .consult-form { display: grid; gap: 10px; }
+/* 首页「等你决定」：任务那一行下面直接是完整的决定卡片 */
+.needs-item { display: grid; }
+.needs-item > .decision { border: 0; border-top: 1px solid var(--accent-line); border-radius: 0; }
+/* 决定卡片：为什么现在要定、推荐的选项、要她做一件事时的结果框 */
+.why { display: grid; gap: 2px; font-size: 15px; overflow-wrap: anywhere; }
+.option.is-recommended { border-color: var(--accent-line); box-shadow: inset 3px 0 0 var(--accent); }
+.option-name .tag { margin-left: 8px; font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.reply-box.is-main .label { font-weight: 600; color: var(--ink-2); }
+.reply.is-main { min-height: 104px; border-color: var(--accent-line); }
+/* 最近进展 */
+.progress { display: grid; gap: 6px; border-top: 1px solid var(--line-2); padding-top: 10px; }
+.sub-title { font-size: 13.5px; font-weight: 600; color: var(--ink-3); }
+.progress-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.progress-list li { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.progress-at { font-size: 13.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.progress-text { font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 最终汇报：长的先显示前一段，原地展开 */
+.report-box { display: grid; gap: 6px; }
+.report-toggle { justify-self: start; }
+.result.is-cancelled .block-title { color: var(--ink-2); }
+/* 上一轮的汇报（还没做到）：折起来 */
+.last-result { padding: 0; }
+.last-result > summary { list-style: none; cursor: pointer; min-height: 48px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; font-size: 15px; color: var(--ink-2); }
+.last-result > summary::-webkit-details-marker { display: none; }
+.last-result > summary::after { content: "›"; color: var(--ink-3); font-size: 18px; }
+.last-result[open] > summary::after { transform: rotate(90deg); }
+.last-result-body { display: grid; gap: 10px; padding: 0 16px 16px; }
+.last-result .report { font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 已取消 / 已结束：折起来放在最后 */
+.cancelled-sec > summary { list-style: none; cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 6px; }
+.cancelled-sec > summary::-webkit-details-marker { display: none; }
+.cancelled-sec .task-meta { color: var(--ink-3); }
+/* 执行偏好：主执行模型按 Claude / GPT（Codex）分组 */
+.choice-group { font-size: 12.5px; font-weight: 600; color: var(--ink-3); padding: 6px 2px 0; }
+.coord .action-row { padding-top: 2px; }
 @media (max-width: 1039.98px) {
   .taskpage {
     position: fixed; inset: 0; z-index: 20; overflow-y: auto; overscroll-behavior: contain; background: var(--bg);
