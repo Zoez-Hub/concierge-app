@@ -48,6 +48,8 @@ function workingBlock(app, t, options) {
     ['当前执行者', F.executorText(t, options)],
     ['目标环境', F.targetEnv(t)],
     ...F.windowsRows(t),
+    // Windows 那边拿不到运行证据（诊断目录只对 OurHome 仓库的任务开放）：如实写一句
+    ...(t.windowsNote ? [['注意', t.windowsNote]] : []),
     paused ? ['暂停原因', F.pausedReason(t)] : ['当前阶段', n.phase || t.stateText],
     ...(paused && t.life?.state === 'wait' && F.when(t.life.until) ? [['预计恢复', `${F.when(t.life.until)} 前后自动接着做`]] : []),
     ...(F.attemptText(t) ? [['轮次', F.attemptText(t)]] : []),
