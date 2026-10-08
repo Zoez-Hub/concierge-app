@@ -1,6 +1,6 @@
 // 设置（⚙）：这台设备 / 设备（只在 Mac 本机页面）/ 可用模型 / Windows 接收器 / 关于。
 // 「添加设备」：Mac 上的 Concierge 给一次性配对密钥和 Mac 公钥，页面在浏览器里拼出配对链接（带 m）并画成二维码。
-// 可选的令牌只留在这个页面的内存里：不发给 Concierge 的服务，不写进任何存储；关掉面板就清掉。
+// GitHub 凭据只在目标设备输入，不进入二维码或链接。
 // 「输入设备上显示的配对码」：设备上显示 12 位码，Zoe 敲进来（docs/REMOTE.md §3.1）。没有待批准列表。
 // 敲对了显示 6 位数字（pair-code 回的 confirm），请她敲回设备：设备那边核对得上才算配好（终审 F1d）。
 import { h } from '../lib/dom.mjs';
@@ -13,12 +13,12 @@ import * as C from '../lib/choices.mjs';
 
 
 // 只在内存里的配对状态（不进任何存储）
-const pair = { form: false, label: 'iPhone', token: '', url: null, expiresAt: null, withToken: false, error: null, busy: false, startDevices: null };
+const pair = { form: false, label: 'iPhone', url: null, expiresAt: null, error: null, busy: false, startDevices: null };
 // 敲配对码那一栏（只在内存里）
 const code = { text: '', busy: false, result: null };
 
 export function wipePairing() {
-  pair.token = ''; pair.form = false; pair.url = null; pair.expiresAt = null; pair.withToken = false; pair.error = null; pair.busy = false; pair.startDevices = null;
+  pair.form = false; pair.url = null; pair.expiresAt = null; pair.error = null; pair.busy = false; pair.startDevices = null;
   code.text = ''; code.busy = false; code.result = null;
 }
 
@@ -108,7 +108,7 @@ function codeBox(app) {
   return h('div', { class: 'codebox' },
     h('label', { class: 'label', htmlFor: 'pair-code', text: '输入设备上显示的配对码' }),
     h('div', { class: 'code-row' }, input, button(code.busy ? '正在找…' : '配对', go, { primary: true, disabled: code.busy })),
-    h('p', { class: 'note', attrs: { id: 'pair-code-help' }, text: '没法扫码的设备（比如 Windows）上点「手动：粘贴令牌」，它会显示 12 位码。大小写、横线都不要紧。' }),
+    h('p', { class: 'note', attrs: { id: 'pair-code-help' }, text: '优先用「添加设备」复制链接到 Windows。无法传递链接时，在设备上点「粘贴令牌」，它会显示 12 位码。大小写、横线都不要紧。' }),
     code.result ? h('p', { class: ['status', code.result.ok ? 'is-done' : 'is-error'], attrs: { role: 'status', id: 'pair-code-result' }, text: code.result.text }) : null,
     // 反方向的确认（终审 F1d）：码对上了，Mac 显示 6 位数字，Zoe 敲回设备上
     code.result?.ok && code.result.confirm ? h('div', { class: 'pair-confirm', attrs: { id: 'pair-confirm' } },
@@ -128,30 +128,27 @@ function addDevice(app, list) {
       newDev ? h('p', { class: 'status is-done', text: `已配对：${newDev.label}` }) : null,
       canvas,
       h('p', { text: `用要配对的设备扫这个码。${pair.expiresAt ? `${F.clock(pair.expiresAt)} 前有效，` : ''}只能用一次。` }),
-      pair.withToken ? h('p', { class: 'note', text: '二维码里带着你刚填的令牌：别让别人拍到。链接不在屏幕上显示。' }) : null,
+      h('p', { text: 'Windows：复制链接，在 Windows 浏览器打开。iPhone：用相机扫码，在 Safari 打开。接着按页面提示完成一次性设置；已经配好的浏览器可以继续使用原来的授权。' }),
+      h('p', { class: 'note', text: '链接不含 GitHub 访问凭据，但可以添加设备，请只交给自己的设备。准备凭据超过 10 分钟时，在这里点「完成」后重新添加设备。' }),
       h('div', { class: 'action-row' }, copyBtn, button('完成', () => { wipePairing(); app.render(); }, { cls: 'btn-quiet' })),
       copied);
   }
   if (!pair.form) return button('添加设备', () => { pair.form = true; app.render(); }, { primary: true });
   const label = h('input', { id: 'pair-label', type: 'text', value: pair.label, maxLength: 40, autocomplete: 'off' });
-  const token = h('input', { id: 'pair-token', type: 'password', autocomplete: 'off', spellcheck: false, placeholder: '可以不填', value: pair.token });
   // 重画面板时不丢已经填的字（仍然只在内存里）
   label.addEventListener('input', () => { pair.label = label.value; });
-  token.addEventListener('input', () => { pair.token = token.value; });
   const go = async () => {
     if (pair.busy) return;
     pair.busy = true; pair.error = null;
     pair.label = label.value.trim() || '设备';
-    const t = (pair.token || token.value).trim();
-    pair.token = ''; token.value = ''; // 输入框和内存里都不留
     try {
       const s = await app.transport.startPair(pair.label);
       if (!s.appUrl) throw new Error('远端页面的地址还没配置（config.json 的 remote.appUrl），没法生成链接');
       if (!s.mac?.pub) throw new Error('没有拿到 Mac 的公钥，没法生成链接');
       // m：Mac 公钥。设备经这条可信的路钉住它，之后只认它签名的内容
-      const frag = encodePairFragment({ o: s.owner, r: s.repo, i: s.stateIssue, p: s.pairId, k: s.secret, m: s.mac.pub, t: t || undefined });
+      const frag = encodePairFragment({ o: s.owner, r: s.repo, i: s.stateIssue, p: s.pairId, k: s.secret, m: s.mac.pub });
       pair.url = `${String(s.appUrl).split('#')[0]}#${frag}`;
-      pair.expiresAt = s.expiresAt; pair.withToken = !!t;
+      pair.expiresAt = s.expiresAt;
       pair.startDevices = (app.devices?.devices || []).map((x) => x.id);
     } catch (e) { pair.error = F.startPairMessage(e); }
     pair.busy = false;
@@ -159,8 +156,8 @@ function addDevice(app, list) {
   };
   return h('div', { class: 'pairform' },
     h('label', { class: 'label', htmlFor: 'pair-label', text: '设备名字' }), label,
-    h('label', { class: 'label', htmlFor: 'pair-token', text: '令牌（可选）' }), token,
-    h('p', { class: 'note', text: '填了就一起带进二维码，设备扫完不用再粘贴。令牌只留在这个页面里，不发给 Concierge 的服务。' }),
+    h('p', { text: '1. 生成二维码或链接。2. 在 Windows 或 iPhone 打开。3. 按那边的提示完成一次性 GitHub 访问设置，再点「配对」。Mac 上保持 Concierge 运行。' }),
+    h('p', { class: 'note', text: '首次使用的浏览器需要一份仅限 Concierge 仓库的访问凭据，用来收发任务；新设备页面会带你创建或使用已有的专用凭据，不需要 Mac 的管理员令牌。日常打开无需重复设置。' }),
     pair.error ? h('p', { class: 'status is-error', text: pair.error }) : null,
     h('div', { class: 'action-row' }, button('生成二维码', go, { primary: true }), button('取消', () => { wipePairing(); app.render(); }, { cls: 'btn-quiet' })));
 }

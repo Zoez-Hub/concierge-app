@@ -169,7 +169,7 @@ function render() {
 
   // 横幅：读不到最新状态、设备被移除、有内容没通过签名校验、加到主屏幕
   const rst = app.local ? null : app.transport.status();
-  paint($('banner'), JSON.stringify([app.error, app.flashText, rst?.revoked, rst?.rejected, app.homeHint, view?.board?.at]), banner);
+  paint($('banner'), JSON.stringify([app.error, app.flashText, rst?.revoked, rst?.rejected, app.homeHint, view?.board?.at, board?.github]), banner);
 
   compose?.update(view);
   const ca = latest(app.actions, (a) => a.kind === 'chip');
@@ -229,8 +229,11 @@ function banner() {
     out.push(h('div', { class: 'banner is-error', attrs: { role: 'status' } }, h('span', { text: `读不到最新状态：${app.error}${app.view && at ? `。下面是 ${F.when(at)} 的内容。` : ''}` }),
       button('重试', () => tick(), { cls: 'btn-quiet' })));
   }
+  // Mac 连不上 GitHub（#61 跟进）：本机页面上任务状态会停在旧的，照实说一句
+  const gd = F.githubDownText(app.view?.board);
+  if (gd) out.push(h('div', { class: 'banner', attrs: { role: 'status', id: 'github-down' } }, h('span', { text: gd })));
   if (app.homeHint) {
-    out.push(h('div', { class: 'banner' }, h('span', { text: '加到主屏幕，下次像 App 一样打开：点分享 → 添加到主屏幕。（主屏幕图标里要再配对一次。）' }),
+    out.push(h('div', { class: 'banner' }, h('span', { text: '下次可继续在 Safari 打开。也可点分享 → 添加到主屏幕；若要求重新配对，已有专用凭据仍可使用。' }),
       button('知道了', async () => { app.homeHint = false; await app.store?.set('hintHome', true); render(); }, { cls: 'btn-quiet' })));
   }
   return out;
@@ -262,7 +265,8 @@ app.pairLink = async (frag, token, { replace = app.pair.replace === true } = {})
     await app.transport.pairByLink(frag, { label: app.defaultLabel, token, replace });
     app.pair = { step: 'waiting' }; // 配对密钥用过就不留在内存里
   } catch (e) {
-    app.pair = { step: back, frag, busy: false, error: e.message, replace };
+    const error = e.status === 401 && back === 'link-token' ? '访问凭据无效或已到期。请在当前页重新粘贴有效凭据；需要新建时按创建步骤操作。' : e.message;
+    app.pair = { step: back, frag, busy: false, error, replace };
   }
   render();
   tick();

@@ -3,7 +3,7 @@
 //   2. 手动：粘贴令牌 → 显示 12 位配对码 → 到 Mac 上把这个码输进去 → Mac 上显示 6 位数字 → 输回这里，对上了才进入（终审 F1d）。
 // 另外几屏：钉住的 Mac 一直验不过 / 状态记录读不到（Mac 的身份对不上 / 状态记录换了 / 旧版本配对的）——直说，钉住的那把照旧记着，
 // 「重新配对」由她自己点；已经配好的设备又打开了配对链接——先问一句要不要换（F1e）。
-import { h } from '../lib/dom.mjs';
+import { h, link } from '../lib/dom.mjs';
 import { decodePairFragment } from '../lib/proto.mjs';
 import { button } from './common.mjs';
 
@@ -12,14 +12,23 @@ const REPO = /^([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})$/;
 export const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 export const isStandalone = () => navigator.standalone === true || globalThis.matchMedia?.('(display-mode: standalone)').matches === true;
 
-function tokenHelp() {
-  return h('details', { class: 'help' }, h('summary', { text: '令牌怎么建' }),
-    h('p', { text: '在 GitHub 的「设置 → Developer settings → 细粒度令牌」新建一个：只选 Concierge 所在的那一个仓库，权限只给 Issues「读写」。令牌只存在这台设备上。' }));
+function tokenHelp(frag = null, label = '设备') {
+  const query = new URLSearchParams({ name: `Concierge ${label}`.slice(0, 40), expires_in: '30', issues: 'write' });
+  if (frag?.o) query.set('target_name', frag.o);
+  const repo = frag ? `${frag.o}/${frag.r}` : 'Mac 上 Concierge 使用的仓库';
+  return h('div', { class: 'help token-help' },
+    h('p', { text: '已有这台设备使用的专用凭据？直接粘贴即可，不必再建。否则按下面三步操作：' }),
+    h('ol', {},
+      h('li', {}, link(`https://github.com/settings/personal-access-tokens/new?${query}`, '打开 GitHub 创建访问凭据'), '，登录自己的 GitHub 账号。保留此页，创建后返回。'),
+      h('li', { text: `Resource owner 确认是 ${frag?.o || '仓库所有者'}。选 Only select repositories，只选 ${repo}；Issues 选 Read and write，其他权限保持默认。` }),
+      h('li', { text: `确认到期日（默认 30 天），点 Generate token。复制生成的内容，返回这里粘贴，再点「${frag ? '配对' : '下一步'}」。` })),
+    h('details', {}, h('summary', { text: '权限、保存与到期说明' }),
+      h('p', { class: 'note', text: '只需要这个仓库的 Issues 读写与自动附带的 Metadata 只读；不要选择全部仓库或增加代码权限。不要使用 Mac、命令行或 Windows 后台服务的高权限令牌。若 GitHub 要求组织批准，等批准后再配对。凭据只保存在当前浏览器并发给 GitHub，不发给 Mac，不放进链接。到期后需更新；清除浏览器数据或换浏览器后需重新设置。' })));
 }
 
 function iosHint() {
   if (!isIos() || isStandalone()) return null;
-  return h('p', { class: 'note hint', text: '想像 App 一样用：先点分享 → 添加到主屏幕，再从主屏幕打开来配对。iPhone 上主屏幕图标和 Safari 的存储是分开的，在 Safari 里配好的，主屏幕图标里要再配一次。' });
+  return h('p', { class: 'note hint', text: '先在 Safari 完成配对，就可以使用。想像 App 一样打开，可稍后点分享 → 添加到主屏幕；如果主屏幕图标要求重新配对，已有专用凭据仍可使用。' });
 }
 
 const CHANGED = {
@@ -100,9 +109,11 @@ export function renderPair(app) {
   if (p.step === 'link-token' && p.frag) {
     const tok = h('input', { id: 'tok-link', type: 'password', autocomplete: 'off', spellcheck: false, value: p.token || '', attrs: { autocapitalize: 'off' } });
     tok.addEventListener('input', () => { p.token = tok.value; });
-    out.push(h('section', { class: 'block' }, h('h2', { text: '粘贴令牌' }),
-      h('p', { text: '这个配对链接里没有带令牌。粘贴这台设备用的令牌，就能完成配对。' }),
-      h('label', { class: 'label', htmlFor: 'tok-link', text: '令牌' }), tok, tokenHelp(),
+    out.push(h('section', { class: 'block' }, h('h2', { text: '完成这台设备的一次性设置' }),
+      h('p', { text: '已收到 Mac 的邀请。首次使用需要给这台设备开通 GitHub 访问，用来收发任务；以后打开无需重复设置。' }),
+      tokenHelp(p.frag, app.defaultLabel),
+      h('label', { class: 'label', htmlFor: 'tok-link', text: '粘贴 GitHub 访问凭据（令牌）' }), tok,
+      h('p', { class: 'note', text: '邀请 10 分钟内有效；过期后在 Mac 重新添加设备，已有专用凭据不用重建。iPhone 先在 Safari 配对即可使用。' }),
       p.error ? h('p', { class: 'status is-error', text: p.error }) : null,
       h('div', { class: 'action-row' }, button(p.busy ? '正在配对…' : '配对', () => app.pairLink(p.frag, tok.value.trim()), { primary: true, disabled: !!p.busy }),
         button('取消', () => { app.pair = { step: 'start' }; app.render(); }, { cls: 'btn-quiet' }))));
@@ -117,7 +128,7 @@ export function renderPair(app) {
     label.addEventListener('input', () => { p.label = label.value; });
     const sec = h('section', { class: 'block' }, h('h2', { text: '手动配对' }),
       h('label', { class: 'label', htmlFor: 'dev-label', text: '这台设备叫什么' }), label,
-      h('label', { class: 'label', htmlFor: 'tok-code', text: '令牌' }), tok, tokenHelp());
+      h('label', { class: 'label', htmlFor: 'tok-code', text: '令牌' }), tok, tokenHelp(null, app.defaultLabel));
     if (p.found && p.found.length > 1 && !p.busy) {
       sec.append(h('p', { text: '这个令牌能看到好几个 Concierge，选一个：' }),
         h('div', { class: 'action-row' }, p.found.map((f) => button(`${f.owner}/${f.repo}`, () => app.pairCode(f)))));
@@ -159,7 +170,7 @@ export function renderPair(app) {
         app.startLink(frag);
       })),
     h('section', { class: 'block' }, h('h2', { text: '手动：粘贴令牌' }),
-      h('p', { text: '没法扫码时（比如 Windows）：粘贴令牌，这里会显示一个 12 位的配对码，到 Mac 上把它输进去。' }),
+      h('p', { text: '无法传递配对链接时：粘贴专用访问凭据，这里会显示一个 12 位的配对码，到 Mac 上把它输进去。Windows 也可以直接打开 Mac 复制的链接。' }),
       button('粘贴令牌', () => { app.pair = { step: 'code', label: app.defaultLabel }; app.render(); })));
   return out;
 }
