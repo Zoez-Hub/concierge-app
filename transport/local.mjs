@@ -91,8 +91,8 @@ export function makeLocalTransport({ fetch = globalThis.fetch.bind(globalThis), 
     // 「添加设备」：{ pairId, secret, expiresAt, label, owner, repo, stateIssue, appUrl, mac:{id, pub} }
     startPair: (label) => call('POST', 'api/pair/start', { label }),
     // 敲设备上显示的配对码。成功 { ok:true, id, label, already }；失败不抛，返回 { ok:false, status, error }（界面按状态码说人话）
-    async pairCode(code) {
-      try { return await call('POST', 'api/devices', { action: 'pair-code', code: String(code ?? '') }); } catch (e) { return { ok: false, status: e.status || 0, error: e.message }; }
+    async pairCode(code, role = null) {
+      try { return await call('POST', 'api/devices', { action: 'pair-code', code: String(code ?? ''), ...(role ? { role } : {}) }); } catch (e) { return { ok: false, status: e.status || 0, error: e.message }; }
     },
     removeDevice: (id) => call('POST', 'api/devices', { action: 'revoke', id }),
   };

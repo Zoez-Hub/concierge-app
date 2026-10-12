@@ -133,8 +133,12 @@ export function mountCompose(app) {
     const verified = (at) => (at ? `上次实测 ${F.day(at)}` : '按配置，还没实测过');
     // 主执行模型：Claude 和 GPT（Codex）都列（同一份登记），按命令行分组；每个只带它原生的 effort
     const groups = C.modelGroups(o);
+    // 选了只在 Windows 上做：只能在 Mac 上跑的模型置灰、写明原因（hub#30 C10：冲突要说出来，不悄悄换）
+    const winOnly = prefs.site === 'windows';
     const models = [{ value: null, label: '自动', sub: C.autoModelText(o).replace(/^自动：/, '') },
-      ...groups.flatMap((g) => [...(groups.length > 1 ? [{ heading: g.label }] : []), ...g.models.map((m) => ({ value: m.id, label: m.name, sub: C.modelSub(m) }))])];
+      ...groups.flatMap((g) => [...(groups.length > 1 ? [{ heading: g.label }] : []), ...g.models.map((m) => (winOnly && C.macOnly(m)
+        ? { value: m.id, label: m.name, sub: '只能在 Mac 上跑：你选了只在 Windows 上做', disabled: true }
+        : { value: m.id, label: m.name, sub: C.modelSub(m) }))])];
     const efforts = C.effortChoices(o, prefs.model);
     const subs = C.subagentChoices(o);
     const consults = o.consult || [];
@@ -143,6 +147,15 @@ export function mountCompose(app) {
     const picked = c.mode === 'named' ? C.findConsult(o, c.key) : null;
 
     const parts = [h('h3', { class: 'panel-title', text: '执行偏好' }),
+      // 先选在哪里做，再选谁做（hub#30 C01：做什么 → 在哪里 → 用谁 → 高级）
+      h('div', { class: 'panel-sec' }, h('h4', { text: '在哪里做' }),
+        radios('p-site', '在哪里做', [
+          { value: null, label: '自动', sub: '按这件事要的现场选；原话里写了“只在 Mac 做”“不派给 Windows”的照办' },
+          { value: 'mac', label: 'Mac', sub: '只在 Mac 上做。要 Windows 现场才能做完时会先问你，不会换机器' },
+          o.windowsSite?.available === false
+            ? { value: 'windows', label: 'Windows', sub: o.windowsSite.why, disabled: true }
+            : { value: 'windows', label: 'Windows', sub: '只在 Windows 上做（那边只有 Claude 做主执行）。要 Mac 才能做完时会先问你' },
+        ], prefs.site ?? null, (v) => setPrefs({ ...prefs, site: v }))),
       h('div', { class: 'panel-sec' }, h('h4', { text: '主执行' }),
         radios('p-model', '模型', models, prefs.model, (v) => setPrefs({ ...prefs, model: v, effort: null })),
         prefs.model && !efforts.length ? null
@@ -267,7 +280,8 @@ export function mountCompose(app) {
   renderSummary();
   return {
     update(view) {
-      const next = view?.board?.options || null;
+      // 能不能手选 Windows 跟着接收器的能力走（choices.windowsSite），并进 options 一起比较
+      const next = view?.board?.options ? { ...view.board.options, windowsSite: C.windowsSite(view.board) } : null;
       const k = JSON.stringify(next);
       if (k !== JSON.stringify(options)) { options = next; prefs = C.fixPrefs(prefs, options); }
       if (hint) {

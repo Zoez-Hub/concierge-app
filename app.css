@@ -134,8 +134,16 @@ main { padding: 0 max(var(--gutter), env(safe-area-inset-right)) calc(env(safe-a
 @media (min-width: 1040px) {
   .cols { max-width: 1200px; grid-template-columns: 420px minmax(0, 1fr); gap: 48px; }
   .right { padding-top: 18px; }
-  .left { position: sticky; top: calc(var(--top-h) + var(--rcv-h) + 1px); max-height: calc(100vh - var(--top-h) - var(--rcv-h)); overflow-y: auto; padding-bottom: 24px; scrollbar-width: thin; }
+  /* 左栏不再自己滚（hub#30 C09）：整页只有一个滚动条 */
+  .left { padding-bottom: 24px; }
 }
+/* 任务详情是独立的主工作区（C05 / B3）：进到任务里，“新建任务”和列表都收起来，详情占满；返回再回到列表 */
+body.has-task #left, body.has-task #tasklist { display: none; }
+@media (min-width: 1040px) {
+  body.has-task .cols { max-width: 820px; grid-template-columns: minmax(0, 1fr); }
+}
+/* 设置面板、底部弹出的选择：打开时底下的页面不跟着滚（只留一个滚动区） */
+body.has-settings, body.sheet-open { overflow: hidden; }
 .sec-title, .group-title { font-size: 14px; font-weight: 600; color: var(--ink-3); margin: 0 2px 8px; display: flex; align-items: center; gap: 8px; }
 .banners { max-width: 1200px; margin: 0 auto; display: grid; gap: 8px; }
 .banners:not(:empty) { padding-top: 12px; }
@@ -339,10 +347,20 @@ a.task:hover { background: var(--bg); }
 .tp-fresh { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 12px; min-width: 0; }
 .block-title { font-size: 14px; font-weight: 600; color: var(--ink-3); }
-.said { background: transparent; border: 0; padding: 4px 2px 6px; }
+/* 原话现在是和工程证据一样的折叠卡片（hub#30 B2），用 .block 的外观 */
 .result .report { font-size: 16px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .result.is-unmet .block-title { color: var(--danger); }
-.tp-want { font-size: 20px; line-height: 1.45; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tp-want { font-size: 16px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 摘要卡（C05 / B2）：任务名、状态一眼可见，其余用同一套 rows */
+.summary { display: grid; gap: 6px; }
+.tp-name { font-size: 20px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.tp-status { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.summary.is-needs_zoe .tp-status, .summary.is-paused .tp-status { color: var(--accent); }
+.said > summary, .evidence > summary { list-style: none; cursor: pointer; min-height: 44px; display: flex; align-items: center; justify-content: space-between; font-weight: 600; color: var(--ink-2); }
+.said > summary::-webkit-details-marker, .evidence > summary::-webkit-details-marker { display: none; }
+.said > summary::after, .evidence > summary::after { content: "›"; color: var(--ink-3); font-size: 18px; transition: transform 0.15s; }
+.said[open] > summary::after, .evidence[open] > summary::after { transform: rotate(90deg); }
+.evidence-body { display: grid; gap: 16px; padding-top: 8px; }
 .tp-extra { display: grid; gap: 2px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tp-source { font-size: 13.5px; color: var(--ink-3); }
 .decision { background: var(--accent-soft); border-color: var(--accent-line); }
@@ -399,14 +417,9 @@ a.task:hover { background: var(--bg); }
 /* 执行偏好：主执行模型按 Claude / GPT（Codex）分组 */
 .choice-group { font-size: 12.5px; font-weight: 600; color: var(--ink-3); padding: 6px 2px 0; }
 .coord .action-row { padding-top: 2px; }
+/* 手机上任务详情也是普通页面（不再是盖在列表上的浮层，浮层和底下的列表是两个滚动区，C09） */
 @media (max-width: 1039.98px) {
-  .taskpage {
-    position: fixed; inset: 0; z-index: 20; overflow-y: auto; overscroll-behavior: contain; background: var(--bg);
-    padding: calc(env(safe-area-inset-top) + 6px) max(var(--gutter), env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 32px) max(var(--gutter), env(safe-area-inset-left));
-  }
-}
-@media (min-width: 1040px) {
-  body.has-task #tasklist { display: none; }
+  .taskpage { padding-top: 6px; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .taskpage:not([hidden]) { animation: slidein 0.22s ease-out; }

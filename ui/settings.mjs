@@ -80,7 +80,7 @@ function devicesSection(app) {
         await app.loadDevices();
       }, { cls: 'btn-quiet' });
       return h('li', { class: 'dev' }, h('span', { class: 'dev-name', text: x.label }),
-        h('span', { class: 'dev-meta', text: [x.via === 'code' ? '配对码' : '链接', x.addedAt ? `${F.day(x.addedAt)} 加的` : null, x.lastSeenAt ? `最近 ${F.when(x.lastSeenAt)}` : '还没用过'].filter(Boolean).join(' · ') }), rm);
+        h('span', { class: 'dev-meta', text: [x.role === 'coordinator' ? 'GPT Web 协调者' : null, x.via === 'code' ? '配对码' : '链接', x.addedAt ? `${F.day(x.addedAt)} 加的` : null, x.lastSeenAt ? `最近 ${F.when(x.lastSeenAt)}` : '还没用过'].filter(Boolean).join(' · ') }), rm);
     }))
     : h('p', { class: 'note', text: '还没有配对的设备。' }));
   if (remoteOn) parts.push(codeBox(app), addDevice(app, list));
@@ -97,17 +97,21 @@ function codeBox(app) {
     const raw = String(input.value || '').trim();
     if (!normalizePairingCode(raw)) { code.result = F.pairCodeMessage({ ok: false, status: 400 }); app.render(); return; }
     code.busy = true; code.result = null; app.render();
-    const r = await app.transport.pairCode(raw);
+    const r = await app.transport.pairCode(raw, code.coordinator ? 'coordinator' : null);
     code.busy = false;
     code.result = F.pairCodeMessage(r);
-    if (r?.ok) code.text = '';
+    if (r?.ok) { code.text = ''; code.coordinator = false; }
     await app.loadDevices();
     app.render();
   };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  // GPT Web 协调者的派工通道（#100）：Windows 上的工程 MCP 显示的码。勾上 = 它只能派普通任务、取消自己派的任务
+  const coord = h('input', { id: 'pair-coordinator', type: 'checkbox', checked: !!code.coordinator });
+  coord.addEventListener('change', () => { code.coordinator = coord.checked; });
   return h('div', { class: 'codebox' },
     h('label', { class: 'label', htmlFor: 'pair-code', text: '输入设备上显示的配对码' }),
     h('div', { class: 'code-row' }, input, button(code.busy ? '正在找…' : '配对', go, { primary: true, disabled: code.busy })),
+    h('label', { class: 'check', htmlFor: 'pair-coordinator' }, coord, ' 这是 GPT Web 协调者的派工通道（只能派普通任务、取消自己派的任务；回答决定、批准都不行）'),
     h('p', { class: 'note', attrs: { id: 'pair-code-help' }, text: '优先用「添加设备」复制链接到 Windows。无法传递链接时，在设备上点「粘贴令牌」，它会显示 12 位码。大小写、横线都不要紧。' }),
     code.result ? h('p', { class: ['status', code.result.ok ? 'is-done' : 'is-error'], attrs: { role: 'status', id: 'pair-code-result' }, text: code.result.text }) : null,
     // 反方向的确认（终审 F1d）：码对上了，Mac 显示 6 位数字，Zoe 敲回设备上

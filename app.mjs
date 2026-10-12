@@ -89,6 +89,8 @@ app.loadDevices = async () => {
 // ---- 路由：#/t/<repo>/<号>、#/settings ----
 
 app.nav = (hash) => {
+  // 从列表进到任务之前记下列表滚到哪（render 之后列表就收起了，滚动值会被截掉）
+  if (app.route.name === 'home') app.ui.listY = window.scrollY;
   history.pushState({ concierge: true }, '', hash);
   onRoute();
 };
@@ -104,9 +106,14 @@ function onRoute() {
   if (app.route.name === 'settings' && prev.name !== 'settings') app.loadDevices();
   render();
   // 换页之后把焦点放到新页的“返回”上（键盘和读屏用户知道到了哪）
+  // 任务详情是普通页面（整页只有一个滚动条，hub#30 C09）：进去时记下列表滚到哪、回到顶上；回来时回到列表原来的位置
   if (prev.name !== app.route.name || prev.ref !== app.route.ref) {
     const target = app.route.name === 'task' ? $('taskpage') : app.route.name === 'settings' ? $('settings') : null;
-    if (target) { target.scrollTop = 0; target.focus({ preventScroll: true }); } else if (prev.name === 'task') document.querySelector(`[data-ref="${CSS.escape(prev.ref)}"]`)?.focus({ preventScroll: true });
+    if (app.route.name === 'task') window.scrollTo(0, 0);
+    if (target) { target.scrollTop = 0; target.focus({ preventScroll: true }); } else if (prev.name === 'task') {
+      window.scrollTo(0, app.ui.listY || 0);
+      document.querySelector(`[data-ref="${CSS.escape(prev.ref)}"]`)?.focus({ preventScroll: true });
+    }
   }
 }
 window.addEventListener('popstate', onRoute);
@@ -186,9 +193,8 @@ function render() {
   $('taskpage').hidden = r.name !== 'task';
   $('settings').hidden = r.name !== 'settings';
   $('settings-backdrop').hidden = r.name !== 'settings';
-  // 手机上任务页盖住整屏：底下的内容对读屏和键盘不可达
-  const narrow = !matchMedia('(min-width: 1040px)').matches;
-  $('left').inert = (narrow && r.name === 'task') || r.name === 'settings';
+  // 进到任务里，“新建任务”和列表都收起来（任务详情是独立的主工作区）；设置打开时底下的内容对读屏和键盘不可达
+  $('left').inert = r.name === 'task' || r.name === 'settings';
   $('tasklist').inert = r.name === 'task' || r.name === 'settings';
   if (r.name === 'task') {
     const t = app.ordered.find((x) => x.ref === r.ref) || null;

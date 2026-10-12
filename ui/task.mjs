@@ -1,8 +1,10 @@
-// 任务页（docs/UI.md §4），从上到下：
-//   0 等她决定的卡片（有才显示，在最上面，和首页「等你决定」同一张）
-//   1 她说的话和额外要求、来源  2 状态块（正在处理 / 暂停 / 完成 / 已取消）+ 上一轮没做到的汇报  3 执行方案  4 谁做了什么
-//   5 本次执行资源  6 工程详情（默认折叠）  7 现在能做的动作（不能做的不显示）  8 GPT Web 协调者（桥开着时）
-// Issue、PR、分支这些词只出现在第 6 段。
+// 任务页（docs/UI.md §4，hub#30 C05 / B2），从上到下：
+//   1 摘要卡：「#86 · 短名」、状态、谁在做 / 在哪台机器、最新进展、下一步、需不需要你、最近更新（第一屏就能看完）
+//   2 等她决定的卡片（有才显示，和首页「等你决定」同一张）
+//   3 详情：正在处理的状态细节和最近进展 / 完成的最终汇报和过程记录 / 已取消；上一轮没做到的汇报
+//   4 现在能做的动作（不能做的不显示）  5 GPT Web 协调者（桥开着时）
+//   6 原话和额外要求、来源（折叠）  7 执行方案、谁做了什么、资源、工程详情（折叠）
+// Issue、PR、分支这些词只出现在工程详情里。
 import { h, link } from '../lib/dom.mjs';
 import * as F from '../lib/format.mjs';
 import { rows, section, button, statusLine, latest, copyButton } from './common.mjs';
@@ -25,37 +27,76 @@ function head(app, t) {
     h('span', { class: 'tp-meta' }, h('span', { class: 'tp-fresh', text: freshText(app) }), h('span', { class: 'tp-ref', text: t ? t.ref : '' })));
 }
 
-function saidBlock(t) {
-  return h('section', { class: 'block said' },
-    h('h2', { class: 'tp-want', text: said(t.want || t.title) }),
-    t.extra ? h('p', { class: 'tp-extra' }, h('span', { class: 'label', text: '额外要求' }), h('span', { text: t.extra })) : null,
-    h('p', { class: 'tp-source', text: F.sourceLine(t) }),
+// 摘要卡：第一屏要回答“这是哪件事、谁在做、做到哪了、接下来干什么、要不要我动手”
+function summaryNeed(t) {
+  if (t.state === 'needs_zoe') {
+    if (t.decision?.kind === 'sensitive') return '要：批准或拒绝（只能在 Mac 上批）';
+    if (t.decision?.handler === 'life-zoe') return '要：做下面说的那件事，做完在这里写一句结果';
+    return '要：在下面选一个';
+  }
+  if (t.state === 'done') return t.result?.zoe && String(t.result.zoe).trim() ? t.result.zoe : '不需要';
+  if (t.state === 'cancelled') return '不需要';
+  return F.needLine(t);
+}
+function summaryBlock(app, t, options) {
+  const pr = F.latestProgress(t);
+  const upd = [t.updatedAt, pr?.at].filter((x) => x && Number.isFinite(Date.parse(x))).sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  // 结束了的：取最后一次主执行的模型和机器（同一次）；没有执行记录就照实说
+  const last = (t.provenance?.main || []).at(-1);
+  const who = t.state === 'done' || t.state === 'cancelled'
+    ? (last ? [F.modelLabel(last.model, options), last.machine].filter(Boolean).join(' · ') : '没有执行记录')
+    : `${F.executorText(t, options)} · ${F.targetEnv(t)}`;
+  const need = summaryNeed(t);
+  return h('section', { class: ['block', 'summary', `is-${t.state}`] },
+    h('h2', { class: 'tp-name', text: F.taskName(t, { home: app.view?.board?.home || null, max: 60 }) }),
+    h('p', { class: 'tp-status', text: F.statusTitle(t) }),
+    rows([
+      [t.state === 'done' || t.state === 'cancelled' ? '谁做的' : '谁在做', who],
+      ['最新进展', F.findingLine(t)],
+      ['下一步', F.nextLine(t)],
+      ['需要你', need],
+      ['最近更新', F.when(upd) || '没有记录'],
+    ]),
     F.truncatedNote(t) ? h('p', { class: 'note', text: F.truncatedNote(t) }) : null);
 }
 
-// 状态块：每一栏都按视图里的真实字段写（format.mjs 的 statusTitle / executorText / targetEnv / needLine / windowsRows）
-function workingBlock(app, t, options) {
+// 她的原话：默认折叠（第一屏留给摘要），点开能读完
+function saidBlock(app, t) {
+  const d = h('details', { class: 'block said' },
+    h('summary', { text: '原话和额外要求' }),
+    h('p', { class: 'tp-want', text: said(t.want || t.title) }),
+    t.extra ? h('p', { class: 'tp-extra' }, h('span', { class: 'label', text: '额外要求' }), h('span', { text: t.extra })) : null,
+    h('p', { class: 'tp-source', text: F.sourceLine(t) }));
+  keepOpen(app, d, `${t.ref}|said`);
+  return d;
+}
+
+// 页面每分钟会重画一次：她点开的折叠块保持点开
+function keepOpen(app, d, key) {
+  d.open = !!app.ui.reportOpen?.has(key);
+  d.addEventListener('toggle', () => {
+    if (!app.ui.reportOpen) app.ui.reportOpen = new Set();
+    if (d.open) app.ui.reportOpen.add(key); else app.ui.reportOpen.delete(key);
+  });
+}
+
+// 状态细节：每一栏都按视图里的真实字段写（format.mjs 的 windowsRows / pausedReason / attemptText）
+function workingBlock(t) {
   const n = t.now || {};
   const b = t.bill;
   const spent = [b ? `${b.sessions} 次会话` : null, F.since(t.createdAt) ? `提交后 ${F.since(t.createdAt)}` : null].filter(Boolean).join(' · ');
   const subs = (t.provenance?.subagents || []).reduce((a, x) => a + (Number(x.n) || 0), 0);
   const cons = (t.provenance?.consults || []).reduce((a, x) => a + (Number(x.n) || 0), 0);
   const paused = t.state === 'paused';
-  // 最近更新：任务本身的更新时间和最新一句进展，取晚的那个
-  const pr = F.latestProgress(t);
-  const upd = [t.updatedAt, pr?.at].filter((x) => x && Number.isFinite(Date.parse(x))).sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  // 谁在做、在哪台机器、需要你、最近更新在摘要卡里（hub#30 B2）；这里是细节
   const list = [
-    ['当前执行者', F.executorText(t, options)],
-    ['目标环境', F.targetEnv(t)],
     ...F.windowsRows(t),
     paused ? ['暂停原因', F.pausedReason(t)] : ['当前阶段', n.phase || t.stateText],
     ...(paused && t.life?.state === 'wait' && F.when(t.life.until) ? [['预计恢复', `${F.when(t.life.until)} 前后自动接着做`]] : []),
     ...(F.attemptText(t) ? [['轮次', F.attemptText(t)]] : []),
-    ['最近更新', F.when(upd) || '没有记录'],
-    ['需要你', F.needLine(t)],
     ['已用资源', [spent || '还没有用量记录', subs ? `子代理 ${subs} 个` : null, cons ? `咨询 ${cons} 次` : null].filter(Boolean).join(' · ')],
   ];
-  return h('section', { class: ['block', 'status-block', `is-${t.state}`] }, h('h3', { class: 'block-title', text: F.statusTitle(t) }), rows(list), progressList(t));
+  return h('section', { class: ['block', 'status-block', `is-${t.state}`] }, h('h3', { class: 'block-title', text: '进展细节' }), rows(list), progressList(t));
 }
 
 // 最近进展：会话自己写的几句人话（最新的在前），页面自己会更新，不用她刷新。没有原始日志、没有工具名
@@ -245,18 +286,25 @@ export function renderTaskPage(app, t) {
   const options = app.view?.board?.options || null;
   const bill = F.billRows(t);
   const ended = t.state === 'done' || t.state === 'cancelled';
+  // 执行方案、谁做了什么、资源、工程详情：工程证据，默认折叠（hub#30 C05）
+  const evidence = h('details', { class: 'block evidence' }, h('summary', { text: '执行方案、资源和工程证据' }),
+    h('div', { class: 'evidence-body' }, [
+      planBlock(t, options),
+      section('谁做了什么', rows(F.provenanceRows(t, options))),
+      section(ended ? '本次执行资源' : '到目前为止用的资源', bill ? rows(bill) : h('p', { class: 'note', text: '还没有用量记录。' })),
+      engineering(t),
+    ].filter(Boolean)));
+  keepOpen(app, evidence, `${t.ref}|evidence`);
   return [
     head(app, t),
-    // 要她决定的放在最上面（她的原话上面），和首页「等你决定」同一张卡片
+    summaryBlock(app, t, options),
+    // 要她决定的紧跟摘要卡，和首页「等你决定」同一张卡片
     t.state === 'needs_zoe' ? decisionCard(app, t, { where: 'page' }) : null,
-    saidBlock(t),
-    ...[t.state === 'needs_zoe' ? null : t.state === 'done' ? resultBlock(app, t) : t.state === 'cancelled' ? cancelledBlock(app, t) : workingBlock(app, t, options)].flat(),
+    ...[t.state === 'needs_zoe' ? null : t.state === 'done' ? resultBlock(app, t) : t.state === 'cancelled' ? cancelledBlock(app, t) : workingBlock(t)].flat(),
     lastResultBlock(app, t),
-    planBlock(t, options),
-    section('谁做了什么', rows(F.provenanceRows(t, options))),
-    section(ended ? '本次执行资源' : '到目前为止用的资源', bill ? rows(bill) : h('p', { class: 'note', text: '还没有用量记录。' })),
-    engineering(t),
     actionsBlock(app, t),
     coordinatorBlock(app, t),
+    saidBlock(app, t),
+    evidence,
   ].filter(Boolean);
 }

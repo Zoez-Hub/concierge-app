@@ -1,6 +1,7 @@
 // ③ 任务列表：刚送出的 → 等你决定（有才显示，最上，醒目，每一条直接带完整的决定卡片）→ 正在处理（含暂停）→ 完成（最近 5 条 + 更多）
-// → 已取消 / 已结束（折起来，不算完成）。
-// 每一条两行：她说的那句话（截断）；状态 + 谁在做（在做的优先写最新一句进展和时间）。
+// → 结束 · 没做到（有才显示，不混进完成，hub#30 C04）→ 已取消 / 已结束（折起来，不算完成）。
+// 每一条两行：任务名「#86 · 短名」（hub#30 C08）；状态 + 谁在做（在做的优先写最新一句进展和时间）。
+// 还没变成任务的（刚送出、正在登记）没有编号，照旧显示她说的那句话。
 import { h } from '../lib/dom.mjs';
 import * as F from '../lib/format.mjs';
 import { button } from './common.mjs';
@@ -11,7 +12,7 @@ const firstLine = (s) => String(s || '').trim().split('\n')[0];
 function row(app, t, options) {
   const href = F.hashOfTask(t.ref);
   const a = h('a', { class: ['task', `is-${t.state}`], attrs: { 'data-ref': t.ref } },
-    h('span', { class: 'task-want', text: firstLine(t.want) || t.title || '（这条任务没有原话）' }),
+    h('span', { class: 'task-want', text: F.taskName(t, { home: app.view?.board?.home || null }) }),
     h('span', { class: 'task-meta', text: F.listLine(t, options) }));
   a.href = href;
   a.addEventListener('click', (e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); app.nav(href); });
@@ -48,7 +49,7 @@ function pendingRows(app, view, outbox) {
 
 export function renderTaskList(app, view, ordered, outbox) {
   const options = view?.board?.options || null;
-  const { needs, active, done, cancelled } = F.groupTasks(ordered);
+  const { needs, active, done, unmet, cancelled } = F.groupTasks(ordered);
   const pend = pendingRows(app, view, outbox);
   const out = [];
   if (pend.length) out.push(h('section', { class: 'group-sec', attrs: { 'aria-label': '刚送出' } }, h('h2', { class: 'group-title', text: '刚送出' }), h('ul', { class: 'tasklist' }, pend)));
@@ -68,6 +69,11 @@ export function renderTaskList(app, view, ordered, outbox) {
   out.push(h('section', { class: 'group-sec' }, h('h2', { class: 'group-title', text: '完成' }),
     done.length ? h('ul', { class: 'tasklist' }, shown.map((t) => row(app, t, options))) : h('p', { class: 'empty', text: '还没有完成的任务。' }),
     done.length > F.DONE_SHOWN ? button(app.ui.doneAll ? '收起' : `更多（还有 ${done.length - F.DONE_SHOWN} 条）`, () => { app.ui.doneAll = !app.ui.doneAll; app.render(); }, { cls: 'btn-quiet more' }) : null));
+  // 结束了但原来要的没做到：单独一组，放在完成后面，不算完成
+  if (unmet.length) {
+    out.push(h('section', { class: 'group-sec unmet-sec', attrs: { 'aria-label': '结束 · 没做到' } }, h('h2', { class: 'group-title' }, '结束 · 没做到', h('span', { class: 'count', text: String(unmet.length) })),
+      h('ul', { class: 'tasklist' }, unmet.map((t) => row(app, t, options)))));
+  }
   // 已取消 / 按她的决定结束的：不算完成，折起来放在最后
   if (cancelled.length) {
     const d = h('details', { class: 'group-sec cancelled-sec' },
