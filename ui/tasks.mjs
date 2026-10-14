@@ -1,4 +1,5 @@
-// ③ 任务列表：刚送出的 → 等你决定（有才显示，最上，醒目，每一条直接带完整的决定卡片）→ 正在处理（含暂停）→ 完成（最近 5 条 + 更多）
+// ③ 任务列表：刚送出的 → 等你决定（有才显示，最上，醒目，每一条直接带完整的决定卡片）→ 正在处理（真有人在做的）
+//   → 排队 / 等条件（会自己往下走的；有才显示）→ 没人在做（暂停、工程待接手；有才显示，hub#149）→ 完成（最近 5 条 + 更多）
 // → 结束 · 没做到（有才显示，不混进完成，hub#30 C04）→ 已取消 / 已结束（折起来，不算完成）。
 // 每一条两行：任务名「#86 · 短名」（hub#30 C08）；状态 + 谁在做（在做的优先写最新一句进展和时间）。
 // 还没变成任务的（刚送出、正在登记）没有编号，照旧显示她说的那句话。
@@ -49,7 +50,7 @@ function pendingRows(app, view, outbox) {
 
 export function renderTaskList(app, view, ordered, outbox) {
   const options = view?.board?.options || null;
-  const { needs, active, done, unmet, cancelled } = F.groupTasks(ordered);
+  const { needs, active, waiting, idle, done, unmet, cancelled } = F.groupTasks(ordered);
   const pend = pendingRows(app, view, outbox);
   const out = [];
   if (pend.length) out.push(h('section', { class: 'group-sec', attrs: { 'aria-label': '刚送出' } }, h('h2', { class: 'group-title', text: '刚送出' }), h('ul', { class: 'tasklist' }, pend)));
@@ -65,6 +66,17 @@ export function renderTaskList(app, view, ordered, outbox) {
   }
   out.push(h('section', { class: 'group-sec' }, h('h2', { class: 'group-title' }, '正在处理', active.length ? h('span', { class: 'count', text: String(active.length) }) : null),
     active.length ? h('ul', { class: 'tasklist' }, active.map((t) => row(app, t, options))) : h('p', { class: 'empty', text: '现在没有在处理的任务。' })));
+  // hub#149：不在做的不放在“正在处理”下面。会自己往下走的一组；后台不会自己接着做的另一组。每一条的第二行写着在等什么、要谁接手
+  if (waiting.length) {
+    out.push(h('section', { class: 'group-sec waiting-sec', attrs: { 'aria-label': '排队 / 等条件' } }, h('h2', { class: 'group-title' }, '排队 / 等条件', h('span', { class: 'count', text: String(waiting.length) })),
+      h('p', { class: 'note', text: '还没开始或在等条件，到了会自己接着做。' }),
+      h('ul', { class: 'tasklist' }, waiting.map((t) => row(app, t, options)))));
+  }
+  if (idle.length) {
+    out.push(h('section', { class: 'group-sec idle-sec', attrs: { 'aria-label': '没人在做' } }, h('h2', { class: 'group-title' }, '没人在做', h('span', { class: 'count', text: String(idle.length) })),
+      h('p', { class: 'note', text: '这些现在没有执行者在做，后台也不会自己接着做：有的点“继续”会再开一轮，有的要工程接手。' }),
+      h('ul', { class: 'tasklist' }, idle.map((t) => row(app, t, options)))));
+  }
   const shown = app.ui.doneAll ? done : done.slice(0, F.DONE_SHOWN);
   out.push(h('section', { class: 'group-sec' }, h('h2', { class: 'group-title', text: '完成' }),
     done.length ? h('ul', { class: 'tasklist' }, shown.map((t) => row(app, t, options))) : h('p', { class: 'empty', text: '还没有完成的任务。' }),

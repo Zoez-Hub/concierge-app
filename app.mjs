@@ -14,6 +14,7 @@ import { renderQuota } from './ui/resources.mjs';
 import { renderTaskList } from './ui/tasks.mjs';
 import { renderTaskPage } from './ui/task.mjs';
 import { renderSettings, wipePairing } from './ui/settings.mjs';
+import { refreshPushState } from './ui/notify.mjs';
 import { renderPair, isIos, isStandalone } from './ui/pair.mjs';
 import { button, latest } from './ui/common.mjs';
 
@@ -103,7 +104,11 @@ function onRoute() {
   const prev = app.route;
   app.route = F.routeOf(location.hash);
   if (app.route.name !== 'settings') wipePairing();
-  if (app.route.name === 'settings' && prev.name !== 'settings') app.loadDevices();
+  if (app.route.name === 'settings' && prev.name !== 'settings') {
+    app.loadDevices();
+    // 这个浏览器的推送订阅（hub#152）：读一次，设置里的「通知」照它显示开 / 关
+    if (!app.local) refreshPushState(app).then(() => app.render()).catch(() => {});
+  }
   render();
   // 换页之后把焦点放到新页的“返回”上（键盘和读屏用户知道到了哪）
   // 任务详情是普通页面（整页只有一个滚动条，hub#30 C09）：进去时记下列表滚到哪、回到顶上；回来时回到列表原来的位置
@@ -200,7 +205,7 @@ function render() {
     const t = app.ordered.find((x) => x.ref === r.ref) || null;
     paint($('taskpage'), JSON.stringify([t, app.actions.filter((a) => a.ref === r.ref), app.ui.consultOpen, app.macOnline(), minute(), !!view, board?.options?.smallWork, board?.options?.consult]), () => renderTaskPage(app, t));
   }
-  if (r.name === 'settings') paint($('settings'), JSON.stringify([board?.options, board?.mac, board?.at, board?.receivers, minute(), app.devices, app.actions.filter((a) => a.kind === 'caps'), app.settingsTick || 0, app.local ? null : app.transport.status().device]), () => renderSettings(app));
+  if (r.name === 'settings') paint($('settings'), JSON.stringify([board?.options, board?.mac, board?.at, board?.receivers, board?.notify, board?.devices, minute(), app.devices, app.actions.filter((a) => a.kind === 'caps' || a.kind === 'push'), app.ui.push || null, app.settingsTick || 0, app.local ? null : app.transport.status().device]), () => renderSettings(app));
 }
 app.render = () => { if (app.route.name === 'settings') app.settingsTick = (app.settingsTick || 0) + 1; render(); };
 

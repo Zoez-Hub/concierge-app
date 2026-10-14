@@ -1,15 +1,20 @@
 // 等她决定的卡片（docs/UI.md §4）：首页「等你决定」和任务页最上面用同一张。
 // 普通决定：问题 / 为什么现在要定 / 每个选项的会得到、代价 / 推荐 / 按钮；敏感操作：要做什么 / 为什么 / 影响 / 回滚 + 批准 / 不批准（只能在 Mac 本机页面上批）。
 // 入口自己提的几类（decision.handler）：
-//   life-zoe       需要你做一件事：问题写要她做什么，文字框写做完的结果，两个按钮（接着做 / 取消这个任务）
+//   life-zoe       需要你做一件事（owner_physical_action，hub#149：只有你本人能做的，比如解锁 / 信任 / 看一眼手机）：
+//                  做什么 / 为什么要你做 / 做完应该看到什么三行（hub#30 C03；旧卡只有问题），文字框写做完的结果，
+//                  两个按钮（接着做 / 取消这个任务）
+// 敏感审批卡和普通操作卡分开（hub#30 C03）：卡片顶上一个标签（“敏感审批 · 只能在 Mac 上批” / “要你动手” / “要你选”），敏感的另用警示色
 //   life-none      按原来的要求做不到了：换个方式再试 / 按现在的结论结束
 //   site-conflict  她指定的模型在需要的那台机器上跑不了
 // 回答带着决定的指纹（d.fp）；这一条已经答过（还在路上，或者入口已经收下、页面还没刷新到）时按钮先不让再点。
 import { h } from '../lib/dom.mjs';
 import { rows, button, statusLine, latest } from './common.mjs';
+import { passkeyState } from './passkey.mjs';
 
 const said = (s) => (s && String(s).trim() ? String(s) : '没写');
 const TITLE = { 'life-zoe': '需要你做一件事', 'life-none': '按原来的要求做不到了', 'site-conflict': '你指定的模型在这台机器上跑不了' };
+const kindTag = (text) => h('p', { class: 'kind-tag', text });
 // 同一页上可能有两张同一个任务的卡片（桌面上首页和任务页并排）：文字框的 id 分开
 const slug = (ref) => String(ref || '').replace(/[^A-Za-z0-9_-]/g, '-');
 
@@ -37,29 +42,53 @@ export function decisionCard(app, t, { where = 'page' } = {}) {
   const status = statusLine(act, { online: app.macOnline(), app });
 
   if (d.kind === 'sensitive') {
-    const canApprove = caps.sensitiveApprove && d.answerable === 'mac-only';
+    // 登记动作（hub#152）在设备上：允许手机批的、这台设备开启了手机批准的，用面容 ID 批；拒绝随时可以
+    const ra = d.handler === 'action' && d.action ? d.action : null;
+    const phone = !caps.local && !!ra;
+    const phoneOk = phone && ra.remote && caps.passkey && passkeyState(app) === 'active';
+    const canApprove = (caps.sensitiveApprove && d.answerable === 'mac-only') || phoneOk;
+    const canDeny = canApprove || phone;
     let confirm = false;
     const approve = button('批准', () => {
       if (!confirm) { confirm = true; approve.textContent = '确认批准'; approve.setAttribute('aria-label', '再点一次确认批准'); return; }
       send('批准');
     }, { primary: canApprove, disabled: !canApprove || busy });
-    const deny = button('不批准', () => send('不批准'), { disabled: !canApprove || busy });
-    return h('section', { class: ['block', 'decision', 'is-sensitive'] },
-      h('h3', { class: 'block-title', text: '等你批准一个敏感操作' }),
-      rows([['要做什么', said(d.what)], ['为什么', said(d.why)], ['影响', said(d.impact)], ['回滚', said(d.rollback)]]),
-      canApprove ? reply : null,
+    if (phoneOk) approve.textContent = '用面容 ID 批准';
+    const deny = button('不批准', () => send('不批准'), { disabled: !canDeny || busy });
+    // 登记动作（hub#152）：批准后由受限执行器只执行这一次。多写：风险、在哪执行、参数、脚本指纹、有效期
+    const a = d.handler === 'action' && d.action ? d.action : null;
+    const actionRows = a ? [
+      ['风险', said(d.risk)],
+      ['怎么执行', `批准后由 ${a.site === 'windows' ? 'Windows' : 'Mac'} 上的受限执行器只执行这一次（登记动作「${a.title || a.runbook}」）`],
+      ['参数', Object.entries(a.args || {}).map(([k, v]) => `${k} = ${v}`).join('；') || '没有'],
+      ['脚本指纹', a.scriptSha || '没写'],
+      ['有效期', a.expiresAt ? `${new Date(a.expiresAt).toLocaleString('zh-CN', { hour12: false })} 之前批准有效` : '没写'],
+    ] : [];
+    return h('section', { class: ['block', 'decision', 'is-sensitive', a ? 'is-runbook' : ''], attrs: { 'data-need': 'owner_approval', 'data-handler': a ? 'action' : null } },
+      kindTag(a ? '审批 · 批准后受限执行器执行' : '敏感审批 · 只能在 Mac 上批'),
+      h('h3', { class: 'block-title', text: a ? `等你批准：${a.title || '一个动作'}` : '等你批准一个敏感操作' }),
+      rows([['要做什么', said(d.what)], ['为什么', said(d.why)], ['影响', said(d.impact)], ...actionRows, ['回滚', said(d.rollback)]]),
+      canDeny ? reply : null,
       h('div', { class: 'decision-actions' }, approve, deny),
-      canApprove ? null : h('p', { class: 'note strong', text: '敏感操作请回到 Mac 上批准' }),
+      canApprove ? null : h('p', { class: 'note strong', text: !phone ? '敏感操作请回到 Mac 上批准'
+        : !ra.remote ? '这个动作只能在 Mac 上批准（这里可以拒绝）'
+          : !caps.passkey ? '这个浏览器用不了面容 ID 批准：回到 Mac 上批准（这里可以拒绝）'
+            : '这台设备还没开启手机批准（设置 → 这台设备 → 手机批准）；也可以回到 Mac 上批准' }),
       status);
   }
   const opts = d.options || [];
   const rec = String(d.recommend || '');
   const isRec = (o) => !!rec && !!o.name && (rec === o.name || rec.startsWith(String(o.name)));
   if (!doTask) onlyText = button('只发这句', () => send(''), { disabled: busy || !input.value.trim() });
-  return h('section', { class: ['block', 'decision', doTask ? 'is-task' : ''], attrs: { 'data-handler': d.handler || null } },
+  // 要你做一件事、而且写全了三项（新卡）：做什么 / 为什么要你做 / 做完应该看到什么，分三行
+  const three = doTask && (d.what || d.expected);
+  return h('section', { class: ['block', 'decision', 'is-action', doTask ? 'is-task' : ''], attrs: { 'data-handler': d.handler || null, 'data-need': doTask ? 'owner_physical_action' : 'owner_action' } },
+    kindTag(doTask ? '要你动手' : '要你选'),
     h('h3', { class: 'block-title', text: TITLE[d.handler] || '等你决定' }),
-    h('p', { class: 'question', text: said(d.question) }),
-    d.why ? h('p', { class: 'why' }, h('span', { class: 'label', text: '为什么现在要定' }), h('span', { text: d.why })) : null,
+    three
+      ? rows([['要你做什么', said(d.what || d.question)], ['为什么要你做', said(d.why)], ['做完应该看到', said(d.expected)]])
+      : h('p', { class: 'question', text: said(d.question) }),
+    !three && d.why ? h('p', { class: 'why' }, h('span', { class: 'label', text: '为什么现在要定' }), h('span', { text: d.why })) : null,
     // 要她做一件事：结果框放在选项前面，最醒目
     doTask ? reply : null,
     opts.length ? h('ol', { class: 'options' }, opts.map((o) => h('li', { class: ['option', isRec(o) ? 'is-recommended' : ''] },

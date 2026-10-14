@@ -28,12 +28,8 @@ function head(app, t) {
 }
 
 // 摘要卡：第一屏要回答“这是哪件事、谁在做、做到哪了、接下来干什么、要不要我动手”
+// 需要你：和列表、首页同一个口径（format.mjs 的 needKind / needLine，hub#30 C03）。只有要她本人动手的写“要：……”
 function summaryNeed(t) {
-  if (t.state === 'needs_zoe') {
-    if (t.decision?.kind === 'sensitive') return '要：批准或拒绝（只能在 Mac 上批）';
-    if (t.decision?.handler === 'life-zoe') return '要：做下面说的那件事，做完在这里写一句结果';
-    return '要：在下面选一个';
-  }
   if (t.state === 'done') return t.result?.zoe && String(t.result.zoe).trim() ? t.result.zoe : '不需要';
   if (t.state === 'cancelled') return '不需要';
   return F.needLine(t);
@@ -47,7 +43,8 @@ function summaryBlock(app, t, options) {
     ? (last ? [F.modelLabel(last.model, options), last.machine].filter(Boolean).join(' · ') : '没有执行记录')
     : `${F.executorText(t, options)} · ${F.targetEnv(t)}`;
   const need = summaryNeed(t);
-  return h('section', { class: ['block', 'summary', `is-${t.state}`] },
+  const kind = F.needKind(t);
+  return h('section', { class: ['block', 'summary', `is-${t.state}`, kind ? `need-${kind.replace(/_/g, '-')}` : ''], attrs: { 'data-need': kind || 'none' } },
     h('h2', { class: 'tp-name', text: F.taskName(t, { home: app.view?.board?.home || null, max: 60 }) }),
     h('p', { class: 'tp-status', text: F.statusTitle(t) }),
     rows([
@@ -97,6 +94,24 @@ function workingBlock(t) {
     ['已用资源', [spent || '还没有用量记录', subs ? `子代理 ${subs} 个` : null, cons ? `咨询 ${cons} 次` : null].filter(Boolean).join(' · ')],
   ];
   return h('section', { class: ['block', 'status-block', `is-${t.state}`] }, h('h3', { class: 'block-title', text: '进展细节' }), rows(list), progressList(t));
+}
+
+// 受限执行器（hub#152）：最近一个登记动作到哪一步了、结果是什么。等批准的在上面的审批卡里，这里不重复
+function actionBlock(t) {
+  const a = t.action;
+  if (!a || a.state === 'pending') return null;
+  const via = a.approvedVia === 'device' ? '你在手机上批准的' : a.approvedVia === 'page' ? '你在 Mac 上批准的' : null;
+  return h('section', { class: ['block', 'action-block', `is-${a.state}`], attrs: { 'data-action-state': a.state } },
+    h('h3', { class: 'block-title', text: '受限执行器' }),
+    rows([
+      ['动作', a.title || a.runbook],
+      ['状态', a.stateText || a.state],
+      ...(a.summary ? [['结果', a.summary]] : []),
+      ...(a.owner ? [['要你做的', a.owner]] : []),
+      ['在哪执行', a.site === 'windows' ? 'Windows' : 'Mac'],
+      ...(via ? [['批准', via]] : []),
+      ...(a.rollbackOf ? [['说明', '这是一次回滚']] : []),
+    ]));
 }
 
 // 最近进展：会话自己写的几句人话（最新的在前），页面自己会更新，不用她刷新。没有原始日志、没有工具名
@@ -211,14 +226,29 @@ function engineering(t) {
   return h('details', { class: 'block eng' }, h('summary', { text: '工程详情' }), body);
 }
 
+// 没人在做时“现在能做的”上面那一句（hub#143 复核、hub#149）：照实写没人在做、后台不会自己接着做、怎么才会接着做。
+// 系统里没有能自动接手工程待接手这类事的工程执行队列（hub#149 核对过）：不写“工程这边会接手”
+export function needNote(t) {
+  const k = F.needKind(t);
+  if (k === 'engineer_blocked') {
+    const same = t.life?.engineer === 'same-site' ? '点“继续”只会再开一轮同样受限的后台会话，解决不了这里的限制。' : '';
+    return `工程待接手：现在没有工程执行者在做这件事，后台也不会自己接着做（还没有能自动接手这类事的工程执行队列）。要推进，需要在有人值守的工程窗口说“接管”。${same}工程这边的事（装机、改配置、写 GitHub、合并部署）不用你自己动手。`;
+  }
+  if (k === 'paused') return '现在没人在做，后台不会自己接着做。不用你动手修；要接着做，点“继续”让后台再开一轮，或者复制“接管”到工程窗口。';
+  return null;
+}
+
 function actionsBlock(app, t) {
   const acts = t.actions || [];
   const items = [];
   if (acts.includes('resume')) {
     const label = t.state === 'queued' && t.plan?.consult?.async ? '不等了，直接做' : t.state === 'paused' ? '继续' : '让后台继续';
-    items.push(button(label, () => app.act(() => app.transport.resume(t)), { primary: t.state === 'paused' }));
+    // 工程待接手的暂停：“继续”只会再开一轮后台，不算要她做的事，不做成主按钮（hub#30 C03 / hub#149）
+    items.push(button(label, () => app.act(() => app.transport.resume(t)), { primary: t.state === 'paused' && F.needKind(t) !== 'engineer_blocked' }));
   }
-  if ((t.state === 'stalled' || t.state === 'handed_off') && /接管/.test(t.stateText || '')) items.push(copyButton(`复制：接管 ${t.ref}`, `接管 ${t.ref}`, app.copy));
+  // 工程这边的按钮（复制“接管”）：工程待接手（hub#149：现在唯一能接手的就是有人值守的工程窗口）、或者状态说明里说要接管的时候给。
+  // 它不算要她做的事（hub#30 C03），只是方便她顺手转给工程窗口
+  if (['engineer_blocked', 'paused'].includes(F.needKind(t)) || ((t.state === 'stalled' || t.state === 'handed_off') && /接管/.test(t.stateText || ''))) items.push(copyButton(`复制：接管 ${t.ref}`, `接管 ${t.ref}`, app.copy));
   // 取消这个任务：点一次变成“确认取消”，再点才送出。取消不算完成
   if (acts.includes('cancel') && app.transport.cancel) {
     const ca = latest(app.actions, (a) => a.kind === 'cancel' && a.ref === t.ref);
@@ -233,7 +263,8 @@ function actionsBlock(app, t) {
   }
   if (!items.length) return null;
   const act = latest(app.actions, (a) => (a.kind === 'resume' || a.kind === 'cancel') && a.ref === t.ref);
-  return h('section', { class: 'block actions' }, h('h3', { class: 'block-title', text: '现在能做的' }), h('div', { class: 'action-row' }, items),
+  const engNote = needNote(t) ? h('p', { class: 'note', text: needNote(t) }) : null;
+  return h('section', { class: 'block actions' }, h('h3', { class: 'block-title', text: '现在能做的' }), engNote, h('div', { class: 'action-row' }, items),
     statusLine(act, { online: app.macOnline(), app }));
 }
 
@@ -300,6 +331,7 @@ export function renderTaskPage(app, t) {
     summaryBlock(app, t, options),
     // 要她决定的紧跟摘要卡，和首页「等你决定」同一张卡片
     t.state === 'needs_zoe' ? decisionCard(app, t, { where: 'page' }) : null,
+    actionBlock(t),
     ...[t.state === 'needs_zoe' ? null : t.state === 'done' ? resultBlock(app, t) : t.state === 'cancelled' ? cancelledBlock(app, t) : workingBlock(t)].flat(),
     lastResultBlock(app, t),
     actionsBlock(app, t),

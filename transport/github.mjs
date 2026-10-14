@@ -18,6 +18,7 @@
 //   - 提交和动作先落本地 outbox 再发，带客户端编号：结果不明时先查 GitHub 上有没有，再决定重发（同一个编号）。
 //   - 从 GitHub 读到的一切都是不可信输入：界面只拿验过签的视图，只用 textContent 显示。
 import * as P from '../lib/proto.mjs';
+import { approvalChallenge, passkeyCode } from '../lib/passkey.mjs';
 
 export const API = 'https://api.github.com';
 export const STATE_LABEL = 'concierge-state';
@@ -72,6 +73,8 @@ const blankViews = () => ({ cache: {}, cursor: null, etagUrl: null, etag: null, 
 export function makeGithubTransport({
   store, fetch = globalThis.fetch.bind(globalThis), now = () => Date.now(),
   pairGraceMs = PAIR_GRACE_MS, ackTimeoutMs = ACK_TIMEOUT_MS, macChangeMs = MAC_CHANGE_MS,
+  // 手机批准（hub#152）：WebAuthn。测试可以换成假的；rpId 就是页面的主机名（Mac 按 remote.appUrl 核对）
+  credentials = globalThis.navigator?.credentials || null, rpId = globalThis.location?.hostname || null,
 } = {}) {
   let cfg = null;            // { owner, repo, stateIssue, login, userId, pairedAt, label, macId }
   let token = null;
@@ -533,7 +536,7 @@ export function makeGithubTransport({
 
   return {
     kind: 'remote',
-    capabilities: { local: false, sensitiveApprove: false, devices: false, unpair: true, ping: true, quotaProbe: true, capsProbe: true },
+    capabilities: { local: false, sensitiveApprove: false, devices: false, unpair: true, ping: true, quotaProbe: true, capsProbe: true, passkey: !!(credentials && globalThis.PublicKeyCredential !== undefined && rpId), push: true },
 
     async init() {
       await load();
@@ -694,9 +697,54 @@ export function makeGithubTransport({
       return { ok: out.state !== 'failed', id: rec.id, state: actionState(out.state), error: out.error || null };
     },
     async answer(t, { choice = '', text = '' }) {
-      // 敏感操作只能在 Mac 上批：这里根本不发（Mac 那边也会拒）
-      if (t.decision?.answerable !== 'any') return { kind: 'answer', ref: t.ref, state: 'failed', error: '敏感操作请回到 Mac 上批准' };
-      return command('answer', { ref: t.ref, decisionFp: String(t.decision?.fp || ''), choice: String(choice), text: String(text) }, { text: choice || text }, t);
+      const d = t.decision || {};
+      const act = d.handler === 'action' && d.action ? d.action : null;
+      const fail = (error) => ({ kind: 'answer', ref: t.ref, state: 'failed', error });
+      // 敏感操作只能在 Mac 上批：这里根本不发（Mac 那边也会拒）。例外是登记动作（hub#152）：
+      // 拒绝随时可以；批准要这台设备开启过手机批准，并且当场用面容 ID 签这一张卡、这一个动作
+      if (d.answerable !== 'any' && !act) return fail('敏感操作请回到 Mac 上批准');
+      let webauthn = null;
+      if (act && choice === '批准') {
+        if (!act.remote) return fail('这个动作只能在 Mac 上批准');
+        const pk = await store.get('passkey');
+        if (!pk || !credentials) return fail('这台设备还没开启手机批准（设置 → 手机批准）；也可以回到 Mac 上批准');
+        const challenge = await approvalChallenge({ digest: act.digest, decisionFp: d.fp, ref: t.ref, device: deviceId });
+        let a;
+        try {
+          a = await credentials.get({ publicKey: { challenge, rpId, allowCredentials: [{ type: 'public-key', id: P.fromB64url(pk.credId) }], userVerification: 'required', timeout: 120000 } });
+        } catch { return fail('面容 ID 没有完成，这次没有批准'); }
+        const r = a?.response;
+        if (!r) return fail('面容 ID 没有完成，这次没有批准');
+        webauthn = { credId: pk.credId, authenticatorData: P.b64url(new Uint8Array(r.authenticatorData)), clientDataJSON: P.b64url(new Uint8Array(r.clientDataJSON)), signature: P.b64url(new Uint8Array(r.signature)) };
+      }
+      return command('answer', { ref: t.ref, decisionFp: String(d.fp || ''), choice: String(choice), text: String(text), ...(webauthn ? { webauthn } : {}) }, { text: choice || text }, t);
+    },
+    // 手机批准（hub#152）：在这台设备上建一个 passkey（要面容 ID），把公钥用设备签名送给 Mac。
+    // Mac 先记成“等确认”：Zoe 把这里显示的 6 位核对码敲进 Mac 本机页面才开启
+    async passkeyEnroll() {
+      if (!cfg?.pairedAt) throw new GhError('这台设备还没配对好', { definitive: true });
+      if (!credentials) throw new GhError('这个浏览器不支持面容 ID 批准', { definitive: true });
+      const challenge = globalThis.crypto.getRandomValues(new Uint8Array(32));
+      let c;
+      try {
+        c = await credentials.create({ publicKey: {
+          rp: { name: 'Concierge', id: rpId }, challenge,
+          user: { id: new TextEncoder().encode(String(deviceId)), name: `concierge-${cfg.label || 'device'}`, displayName: `Concierge · ${cfg.label || '设备'}` },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }], attestation: 'none', timeout: 120000,
+          authenticatorSelection: { userVerification: 'required', residentKey: 'preferred' },
+        } });
+      } catch { throw new GhError('面容 ID 没有完成，手机批准没有开启', { definitive: true }); }
+      const spkiBuf = c?.response?.getPublicKey?.();
+      if (!spkiBuf) throw new GhError('这个浏览器给不出面容 ID 的公钥（要 iOS 17 / Safari 17 或更新）', { definitive: true });
+      const credId = P.b64url(new Uint8Array(c.rawId));
+      const spki = P.b64url(new Uint8Array(spkiBuf));
+      await store.set('passkey', { credId, spki, at: now() });
+      const out = await command('passkey', { action: 'enroll', credId, spki }, { text: '开启手机批准' });
+      return { ...out, code: await passkeyCode(credId, spki) };
+    },
+    async passkeyLocal() {
+      const pk = await store.get('passkey');
+      return pk ? { at: pk.at || null, code: await passkeyCode(pk.credId, pk.spki) } : null;
     },
     resume: (t) => command('resume', { ref: t.ref }, {}, t),
     // 取消这个任务：和继续一样带卡片指纹（对着她看到的那张卡片取消）
@@ -706,5 +754,7 @@ export function makeGithubTransport({
     probeQuota: (pool) => command('quota', { pool }, { text: pool }),
     probeCaps: () => command('caps', {}),
     ping: () => command('ping', {}),
+    // 通知（hub#152）：登记 / 去掉这台设备的推送订阅、让 Mac 发一条试试。订阅地址和钥匙只进这条签名动作（Mac 处理完就删）
+    push: (payload) => command('push', payload, { text: payload?.action || null }),
   };
 }

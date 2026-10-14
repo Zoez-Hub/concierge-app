@@ -374,6 +374,11 @@ a.task:hover { background: var(--bg); }
 .reply { min-height: 48px; font-size: 16px; }
 .decision-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .decision.is-sensitive .rows { background: var(--surface); border-radius: var(--radius-s); padding: 12px 14px; border: 1px solid var(--line); }
+/* 敏感审批卡和普通操作卡分开（hub#30 C03）：顶上的标签；敏感的用警示色的边和标题 */
+.kind-tag { justify-self: start; font-size: 12.5px; font-weight: 600; line-height: 1.4; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; color: var(--accent); }
+.decision.is-sensitive { box-shadow: inset 4px 0 0 var(--danger); border-color: var(--danger); }
+.decision.is-sensitive .block-title, .decision.is-sensitive .kind-tag { color: var(--danger); }
+.decision.is-task .rows { background: var(--surface); border-radius: var(--radius-s); padding: 12px 14px; border: 1px solid var(--line); }
 .eng { padding: 0; }
 .eng > summary { list-style: none; cursor: pointer; min-height: 48px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; font-size: 15px; color: var(--ink-2); }
 .eng > summary::-webkit-details-marker { display: none; }

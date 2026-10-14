@@ -95,6 +95,9 @@ export function makeLocalTransport({ fetch = globalThis.fetch.bind(globalThis), 
       try { return await call('POST', 'api/devices', { action: 'pair-code', code: String(code ?? ''), ...(role ? { role } : {}) }); } catch (e) { return { ok: false, status: e.status || 0, error: e.message }; }
     },
     removeDevice: (id) => call('POST', 'api/devices', { action: 'revoke', id }),
+    // 手机批准（hub#152）：敲手机上显示的核对码开启；关掉
+    confirmPasskey: (id, code) => call('POST', 'api/devices', { action: 'passkey-confirm', id, code }),
+    revokePasskey: (id) => call('POST', 'api/devices', { action: 'passkey-revoke', id }),
   };
 }
 

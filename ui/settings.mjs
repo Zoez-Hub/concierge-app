@@ -1,4 +1,4 @@
-// 设置（⚙）：这台设备 / 设备（只在 Mac 本机页面）/ 可用模型 / Windows 接收器 / 关于。
+// 设置（⚙）：这台设备 / 设备（只在 Mac 本机页面）/ 通知（ui/notify.mjs）/ 可用模型 / Windows 接收器 / 关于。
 // 「添加设备」：Mac 上的 Concierge 给一次性配对密钥和 Mac 公钥，页面在浏览器里拼出配对链接（带 m）并画成二维码。
 // GitHub 凭据只在目标设备输入，不进入二维码或链接。
 // 「输入设备上显示的配对码」：设备上显示 12 位码，Zoe 敲进来（docs/REMOTE.md §3.1）。没有待批准列表。
@@ -10,6 +10,8 @@ import qrcode from '../vendor/qrcode-generator-2.0.4.mjs';
 import { rows, section, button, statusLine, latest } from './common.mjs';
 import { BUILD } from '../build.mjs';
 import * as C from '../lib/choices.mjs';
+import { phoneApprovalSection, macPasskeyControl } from './passkey.mjs';
+import { renderNotify } from './notify.mjs';
 
 
 // 只在内存里的配对状态（不进任何存储）
@@ -54,7 +56,8 @@ function thisDevice(app) {
     rows([['名字', d.label || '设备'], ['配对时间', d.pairedAt ? F.dayTime(d.pairedAt) : '还没配对好'], ['认的 Mac', d.macId ? `钥匙编号 ${d.macId}` : '还没有记住']]),
     h('p', { class: 'note', text: '这台设备只显示这把 Mac 钥匙签过名的内容。' }),
     h('p', { class: 'note', text: '解除配对会清掉这台设备上的令牌和密钥。之后到 Mac 上把它从设备列表里移除。' }),
-    un);
+    un,
+    phoneApprovalSection(app));
 }
 
 function devicesSection(app) {
@@ -79,8 +82,11 @@ function devicesSection(app) {
         await app.act(() => app.transport.removeDevice(x.id));
         await app.loadDevices();
       }, { cls: 'btn-quiet' });
+      // 通知（hub#152）：看板里 Mac 记的这台设备的订阅状态和最近一次送达（协调者没有）
+      const nt = x.role === 'coordinator' ? null : (app.view?.board?.devices || []).find((y) => y.id === x.id)?.notify || null;
       return h('li', { class: 'dev' }, h('span', { class: 'dev-name', text: x.label }),
-        h('span', { class: 'dev-meta', text: [x.role === 'coordinator' ? 'GPT Web 协调者' : null, x.via === 'code' ? '配对码' : '链接', x.addedAt ? `${F.day(x.addedAt)} 加的` : null, x.lastSeenAt ? `最近 ${F.when(x.lastSeenAt)}` : '还没用过'].filter(Boolean).join(' · ') }), rm);
+        h('span', { class: 'dev-meta', text: [x.role === 'coordinator' ? 'GPT Web 协调者' : null, x.via === 'code' ? '配对码' : '链接', x.addedAt ? `${F.day(x.addedAt)} 加的` : null, x.lastSeenAt ? `最近 ${F.when(x.lastSeenAt)}` : '还没用过',
+          nt ? `通知：${F.notifyStateText(nt)}${nt.at ? `（最近 ${F.notifyLastText(nt)}）` : ''}` : null].filter(Boolean).join(' · ') }), rm, macPasskeyControl(app, x));
     }))
     : h('p', { class: 'note', text: '还没有配对的设备。' }));
   if (remoteOn) parts.push(codeBox(app), addDevice(app, list));
@@ -216,6 +222,7 @@ export function renderSettings(app) {
     h('div', { class: 'tp-head' }, button('‹ 返回', () => app.back(), { cls: 'btn-quiet back', attrs: { 'aria-label': '关掉设置' } }), h('h2', { class: 'settings-title', text: '设置' })),
     thisDevice(app),
     app.transport.capabilities.devices ? devicesSection(app) : null,
+    renderNotify(app),
     modelsSection(app),
     receiversSection(app),
     about(app),
