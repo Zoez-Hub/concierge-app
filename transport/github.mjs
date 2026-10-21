@@ -5,9 +5,12 @@
 //       第一次整页读；之后按 GitHub 的 since（评论更新时间）只读变了的，没变时带 ETag（304）。
 //   写  新任务 = 在收件仓库建一条带设备签名的 Issue；别的动作 = 在状态 Issue 上留一条签名的 cmd 评论。
 //       回答 / 让后台继续 / 请咨询都带 card：设备看到的那张（验过签的）卡片的指纹，Mac 对不上就拒绝。
-//   配对 = 留一条 enroll 评论。链接配对：片段里的 m 就是 Mac 公钥，钉住它；配对码：从看板的自签名里取 Mac 公钥
-//         （恰好一把才继续），显示 pairingCode(自己的公钥, Mac 公钥)，Zoe 把它敲进 Mac 上的 Concierge；
-//         Mac 本机页面再显示 6 位数字，Zoe 敲回这台设备，和 pairingConfirm(自己的公钥, 钉住的 Mac 公钥) 对得上才算配好（终审 F1d）。
+//   配对 = 留一条 enroll 评论。链接配对：片段里的 m 就是 Mac 公钥，钉住它。
+//         配对码（hub#165 §15.1）：页面发布时内置了 Mac 公钥（build.mjs 的 BUILD.macPub，publish-web.sh 写的）→ 直接钉住它，
+//         只认有这把签过的看板的那条状态记录；显示 pairingCode(自己的公钥, Mac 公钥)，Zoe 把它敲进 Mac 上的 Concierge；
+//         Mac 输对之后，这台设备在验过签的看板设备名单里看到自己就算配好，**不要 6 位**（pairing.pin = 'build'）。
+//         页面没有内置公钥（本地源码 / 没发布过）→ 退回旧流程：从看板的自签名里取 Mac 公钥（恰好一把才继续，“先信后验”，pin = 'board'），
+//         Mac 上输对之后还要把 Mac 显示的 6 位数字敲回来（confirmCode）才算配好——自签名那把可能是假状态记录上的（终审 F1d / PoC-1）。
 //   钉住的 Mac 公钥：这台设备自己从不丢掉、也不换掉它（终审 F1c、F1e）。状态记录读不到、看板验不过时整屏说明，
 //         照旧记着原来那把，只给「重新配对」（她自己点）；钉住的那把又签出了新的看板就自己恢复。
 // 签名、信封、配对片段、视图验签一律用共用模块 lib/proto.mjs（和 Mac 那边同一个文件），这里不另写。
@@ -42,7 +45,9 @@ const DONE_KEEP_MS = 10 * 60000;
 const FAILED_KEEP_MS = 24 * 3600000;
 const MAX_PAGES = 10;
 const MAX_CACHE = 200;
-const TASK_KINDS = ['answer', 'resume', 'consult', 'cancel'];
+// reclassify / amend / accept（hub#165）也带卡片指纹
+// preauth-revoke（hub#165 §15.3）：撤销任务的预授权，也带卡片指纹
+const TASK_KINDS = ['answer', 'resume', 'consult', 'cancel', 'reclassify', 'amend', 'accept', 'preauth-revoke'];
 const STATES = ['queued', 'working', 'needs_zoe', 'done', 'handed_off', 'stalled', 'paused', 'cancelled'];
 const REF = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}#[1-9][0-9]{0,8}$/;
 
@@ -75,7 +80,10 @@ export function makeGithubTransport({
   pairGraceMs = PAIR_GRACE_MS, ackTimeoutMs = ACK_TIMEOUT_MS, macChangeMs = MAC_CHANGE_MS,
   // 手机批准（hub#152）：WebAuthn。测试可以换成假的；rpId 就是页面的主机名（Mac 按 remote.appUrl 核对）
   credentials = globalThis.navigator?.credentials || null, rpId = globalThis.location?.hostname || null,
+  // 页面内置的 Mac 公钥（hub#165 §15.1，app.mjs 传 BUILD.macPub）：有就是手动连接码的可信来源；null 退回看板自签名 + 6 位核对
+  builtinMacPub = null,
 } = {}) {
+  const builtinMac = builtinMacPub ? P.pubOf(builtinMacPub) : null;
   let cfg = null;            // { owner, repo, stateIssue, login, userId, pairedAt, label, macId }
   let token = null;
   let privateKey = null;
@@ -323,12 +331,13 @@ export function makeGithubTransport({
     return { label: clean };
   }
 
-  async function postEnroll(pair) {
+  // pin（配对码才有）：'build' = 钉住的是页面内置的 Mac 公钥（Mac 上输对就算连好）；'board' = 看板自签名里取的（还要 6 位核对）
+  async function postEnroll(pair, { pin = null } = {}) {
     const { body } = await P.buildEnroll({ device: { id: deviceId, label: cfg.label, pub }, pair });
     const r = await api('POST', `${repoPath()}/issues/${cfg.stateIssue}/comments`, { body: { body } });
     pairing = {
       mode: pair ? 'link' : 'code', commentId: r.data?.id ?? null, postedAt: now(), goneAt: null, checkedAt: 0, state: 'waiting', error: null,
-      code: pair ? null : await P.pairingCode(pub, macPub), tries: 0,
+      code: pair ? null : await P.pairingCode(pub, macPub), tries: 0, ...(pair ? {} : { pin: pin === 'build' ? 'build' : 'board' }),
     };
     await savePairing();
   }
@@ -337,12 +346,13 @@ export function makeGithubTransport({
     if (!cfg || cfg.pairedAt) return;
     if (!pairing || pairing.state !== 'waiting') return;
     const fail = async (error) => { pairing.state = 'failed'; pairing.error = error; await savePairing(); };
-    // 配对码：看板的设备名单不够（终审 F1d）——钉住的 Mac 公钥是从看板自签名里取的，假看板也能把这台设备列进去。
-    // 只认 Zoe 从 Mac 本机页面抄回来的 6 位数字（confirmCode）。这里只管过期
-    if (pairing.mode === 'code') {
-      if (now() - pairing.postedAt > CODE_TTL_MS + CONFIRM_GRACE_MS) await fail('配对码过期了：30 分钟内没有在 Mac 上输入。重新开始，会换一个新的码。');
-      return;
-    }
+    // 配对码（hub#165 §15.1）：
+    //   pin 'build'（钉住的是页面内置的 Mac 公钥）：Zoe 在 Mac 上输对 12 位码之后，验过签的看板里出现这台设备就算配好，不要 6 位——
+    //     假状态记录上的看板用这把验不过，所以设备看到的“已连接”只可能来自真 Mac；真 Mac 只登记 Zoe 亲手输过码的那台设备。
+    //   pin 'board'（看板自签名“先信后验”取的，页面没有内置公钥）：看板的设备名单不够（终审 F1d）——假看板也能把这台设备列进去。
+    //     只认 Zoe 从 Mac 本机页面抄回来的 6 位数字（confirmCode）。这里只管过期
+    if (pairing.mode === 'code' && now() - pairing.postedAt > CODE_TTL_MS + CONFIRM_GRACE_MS) { await fail('配对码过期了：30 分钟内没有在 Mac 上输入。重新开始，会换一个新的码。'); return; }
+    if (pairing.mode === 'code' && pairing.pin !== 'build') return;
     // 链接配对：Mac 公钥来自 Mac 本机页面给的链接（可信的路），验过签的看板里出现了这台设备就算配好
     const devs = Array.isArray(view?.board?.devices) ? view.board.devices : [];
     const me = devs.find((d) => d && d.id === deviceId);
@@ -350,6 +360,7 @@ export function makeGithubTransport({
       // 只认验过签的看板里的设备名单：别人贴的假看板写了这台设备也不算
       cfg.pairedAt = iso(now());
       if (typeof me.label === 'string' && me.label) cfg.label = P.cleanLabel(me.label) || cfg.label;
+      if (pairing.mode === 'code') needFull = true;
       pairing = null;
       await saveCfg(); await savePairing();
       return;
@@ -385,7 +396,7 @@ export function makeGithubTransport({
   async function resign(rec) {
     const ts = iso(now());
     if (rec.kind === 'submit') {
-      const s = await P.buildSubmission({ privateKey, device: deviceId, want: rec.want, extra: rec.extra, prefs: rec.prefs, chips: rec.chips, clientId: rec.id, ts, options: view?.board?.options || null });
+      const s = await P.buildSubmission({ privateKey, device: deviceId, want: rec.want, extra: rec.extra, prefs: rec.prefs, chips: rec.chips, attachments: rec.attachments || [], clientId: rec.id, ts, options: view?.board?.options || null });
       Object.assign(rec, { ts, body: s.body, title: s.title });
     } else {
       const c = await P.buildCommand({ privateKey, device: deviceId, kind: rec.cmd, payload: rec.payload, id: rec.id, ts });
@@ -548,6 +559,8 @@ export function makeGithubTransport({
       return {
         paired: !!cfg?.pairedAt, pairing: pairing ? { ...pairing } : null, revoked,
         device: cfg ? { id: deviceId, label: cfg.label, pairedAt: cfg.pairedAt, macId: cfg.macId || null } : null,
+        // 页面内置了 Mac 公钥没有（手动连接码要不要 6 位核对，pair.mjs 据此说明）
+        builtinMac: !!builtinMac,
         rejected: vs.rejected || 0, macChanged: macChanged ? { ...macChanged } : null,
         lastOk, lastError,
       };
@@ -599,10 +612,28 @@ export function makeGithubTransport({
       return found;
     },
 
-    // 配对码：读看板的自签名，恰好一把 Mac 公钥才钉住它、生成密钥、留配对请求；不止一把就“配不上”，什么都不存
+    // 配对码：页面内置了 Mac 公钥 → 只认有这把签过的看板的那条状态记录，钉住内置的这把（假状态记录上的看板验不过，什么都不存）；
+    // 没有内置 → 读看板的自签名，恰好一把 Mac 公钥才钉住它、生成密钥、留配对请求；不止一把就“配不上”，什么都不存
     async pairByCode({ owner, repo, issues, token: tok, label }) {
       const u = await api('GET', '/user', { tok });
       if (!u.data?.login) throw new GhError('令牌读不到账号信息');
+      if (builtinMac) {
+        let best = null;
+        for (const issue of Array.isArray(issues) ? issues : [issues]) {
+          try {
+            await checkStateIssue(owner, repo, issue, tok);
+            for (const b of await allBodies(owner, repo, issue, tok)) {
+              const p = P.parseStateComment(b);
+              if (p?.kind !== 'board' || !(await P.verifyStateComment(builtinMac, p))) continue;
+              if (!best || p.seq > best.seq) best = { issue, seq: p.seq };
+            }
+          } catch (e) { if (e.status === 401) throw e; }
+        }
+        if (!best) throw new GhError('状态记录上还没有这台 Mac 发来的内容：Mac 上的 Concierge 可能还没开远端通道、刚开还没发布，也可能 Mac 换过钥匙、这个页面还没更新。过一会儿再试，或者在 Mac 上用「添加设备」扫码连接。', { definitive: true, code: 'none' });
+        await setupDevice({ owner, repo, issue: best.issue, tok, label, mac: builtinMac, login: u.data.login, userId: u.data.id });
+        await postEnroll(null, { pin: 'build' });
+        return this.status();
+      }
       const cands = [];
       for (const issue of Array.isArray(issues) ? issues : [issues]) {
         try {
@@ -616,7 +647,7 @@ export function makeGithubTransport({
         throw new GhError('配不上：状态记录上有不止一份自称是 Mac 的看板，分不清哪一份是真的（可能有人在捣乱）。等几分钟再试（Mac 会把假的清掉），或者在 Mac 上用「添加设备」扫码配对。', { definitive: true, code: 'ambiguous' });
       }
       await setupDevice({ owner, repo, issue: cands[0].issue, tok, label, mac: cands[0].macs[0].pub, login: u.data.login, userId: u.data.id });
-      await postEnroll(null);
+      await postEnroll(null, { pin: 'board' });
       return this.status();
     },
 
@@ -624,8 +655,9 @@ export function makeGithubTransport({
     // 用这台设备的公钥和**钉住的** Mac 公钥算 pairingConfirm，对得上才算配好（之后才显示内容）。
     // 设备被骗钉住了假的 Mac 公钥时：真的 Mac 在码对不上时什么数字都不显示，别人也没法让真的 Mac 显示和假公钥对得上的数字。
     // 最多试 CONFIRM_TRIES 次，错满了这次配对作废（重新开始会换一把新钥匙）。
+    // 只有 pin 'board'（页面没有内置 Mac 公钥）的配对要它；内置了的 Mac 上输对就算连好
     async confirmCode(input) {
-      if (!cfg || cfg.pairedAt || pairing?.mode !== 'code' || pairing.state !== 'waiting' || !pub || !macPub) {
+      if (!cfg || cfg.pairedAt || pairing?.mode !== 'code' || pairing.pin === 'build' || pairing.state !== 'waiting' || !pub || !macPub) {
         return { ok: false, error: '现在没有在等 6 位数字的配对。' };
       }
       const d = P.normalizePairingConfirm(String(input ?? ''));
@@ -687,17 +719,20 @@ export function makeGithubTransport({
     },
     async discard(id) { await store.delItem(id); },
 
-    async submit({ want, extra = '', prefs = null, chips = [] }) {
+    // attachments（hub#165）：先用 attach 传上去、等 Mac 回执收到之后再提交（Mac 只认已经落盘的附件）
+    async submit({ want, extra = '', prefs = null, chips = [], attachments = [] }) {
       if (!cfg?.pairedAt) throw new GhError('这台设备还没配对好', { definitive: true });
       if (macChanged) throw new GhError(MAC_UNSURE, { definitive: true });
-      const s = await P.buildSubmission({ privateKey, device: deviceId, want, extra, prefs, chips, ts: iso(now()), options: view?.board?.options || null });
-      const rec = { id: s.clientId, kind: 'submit', want: s.envelope.payload.want, extra: s.envelope.payload.extra, prefs: s.envelope.payload.prefs, chips: s.envelope.payload.chips, ts: s.envelope.ts, title: s.title, body: s.body, state: 'new', attempts: 0, at: now() };
+      const s = await P.buildSubmission({ privateKey, device: deviceId, want, extra, prefs, chips, attachments, ts: iso(now()), options: view?.board?.options || null });
+      const rec = { id: s.clientId, kind: 'submit', want: s.envelope.payload.want, extra: s.envelope.payload.extra, prefs: s.envelope.payload.prefs, chips: s.envelope.payload.chips, ...(s.envelope.payload.attachments ? { attachments: s.envelope.payload.attachments } : {}), ts: s.envelope.ts, title: s.title, body: s.body, state: 'new', attempts: 0, at: now() };
       await store.putItem(rec);
       const out = await send(rec);
       return { ok: out.state !== 'failed', id: rec.id, state: actionState(out.state), error: out.error || null };
     },
-    async answer(t, { choice = '', text = '' }) {
-      const d = t.decision || {};
+    // card:'deferred'——答的是提前申请的那张卡（hub#165 §15.3），它在 t.deferredDecision 里（t.decision 被别的卡占着、或任务已经收尾）。
+    // t 仍是验过签的整份任务视图（卡片指纹从它算）；decisionFp 和面容 ID 挑战绑的是那张卡
+    async answer(t, { choice = '', text = '', card = null }) {
+      const d = (card === 'deferred' ? t.deferredDecision : t.decision) || {};
       const act = d.handler === 'action' && d.action ? d.action : null;
       const fail = (error) => ({ kind: 'answer', ref: t.ref, state: 'failed', error });
       // 敏感操作只能在 Mac 上批：这里根本不发（Mac 那边也会拒）。例外是登记动作（hub#152）：
@@ -746,7 +781,32 @@ export function makeGithubTransport({
       const pk = await store.get('passkey');
       return pk ? { at: pk.at || null, code: await passkeyCode(pk.credId, pk.spki) } : null;
     },
-    resume: (t) => command('resume', { ref: t.ref }, {}, t),
+    // reopen：已经结束的任务「重新开一轮」（hub#165）
+    resume: (t, { reopen = false } = {}) => command('resume', { ref: t.ref, ...(reopen ? { reopen: true } : {}) }, {}, t),
+    // ---- hub#165：和 resume / cancel 同一条路（带卡片指纹、先落本地 outbox、签名、等回执）----
+    reclassify: (t) => command('reclassify', { ref: t.ref }, {}, t),
+    // 撤销这个任务提交时给的预授权（hub#165 §15.3）：之后还没执行的预授权动作回到普通审批
+    preauthRevoke: (t) => command('preauth-revoke', { ref: t.ref }, { text: '撤销预授权' }, t),
+    amend: (t, { text = '', attachments = [] } = {}) => command('amend', { ref: t.ref, text: String(text || ''), attachments: Array.isArray(attachments) ? attachments : [] }, { text }, t),
+    accept: (t, { ok, text = '' } = {}) => command('accept', { ref: t.ref, ok: ok === true, text: String(text || '') }, { text: ok === true ? '通过' : '不通过' }, t),
+    // 附件：data 是 base64，最多 2 段、每段 ≤ 60000 个字符（页面先把图片缩小）。编号由这台设备生成；每段一条签名动作，
+    // Mac 全收到才落盘，回执里写原因。返回 { id, name, kind, bytes, parts:[{ id（动作编号）, state, error }] }——
+    // 等这几条动作都有了成功的回执（actions() 里 kind 'attach'、state 'done'），再把 id 放进 submit / amend 的 attachments
+    async attach({ name, type, data }) {
+      if (!P.ATTACH_TYPES.includes(type)) throw new GhError('这种文件不能当附件：只收 PNG / JPEG / WebP 图片，和纯文本、Markdown、JSON', { definitive: true });
+      const s = String(data || '');
+      if (!s) throw new GhError('附件是空的', { definitive: true });
+      if (s.length > P.ATTACH_PART_MAX * P.ATTACH_PARTS_MAX) throw new GhError('附件太大了：从手机上最多传约 90 KB（图片会先缩小，还是太大就换一张或者回到 Mac 上传）', { definitive: true });
+      const id = P.b64url(globalThis.crypto.getRandomValues(new Uint8Array(12)));
+      const parts = Math.ceil(s.length / P.ATTACH_PART_MAX);
+      const sent = [];
+      for (let i = 0; i < parts; i++) {
+        const r = await command('attach', { id, name: String(name || '').slice(0, 200), type, part: i + 1, parts, data: s.slice(i * P.ATTACH_PART_MAX, (i + 1) * P.ATTACH_PART_MAX) }, { text: String(name || '附件').slice(0, 40) });
+        sent.push({ id: r.id, state: actionState(r.state), error: r.error || null });
+      }
+      const pad = s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0;
+      return { id, name: String(name || ''), kind: type.startsWith('image/') ? 'image' : 'text', bytes: Math.floor(s.length / 4) * 3 - pad, parts: sent };
+    },
     // 取消这个任务：和继续一样带卡片指纹（对着她看到的那张卡片取消）
     cancel: (t, { text = '' } = {}) => command('cancel', { ref: t.ref, text: String(text || '') }, {}, t),
     consult: (t, { question = '', smallWork = false }) => command('consult', { ref: t.ref, question: String(question), smallWork: smallWork === true }, {}, t),

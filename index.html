@@ -2,13 +2,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.github.com; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com; manifest-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f1f3f2">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14191b">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F5F7">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121417">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Concierge">
@@ -29,58 +29,75 @@
   <div class="skel"></div>
 </div>
 
+<aside id="rail" class="rail" aria-label="导航" hidden>
+  <a id="rail-brand" class="wordmark" href="#">Concierge</a>
+  <nav class="rail-nav" aria-label="页面">
+    <button id="nav-work" type="button" class="nav-item" data-nav="work"><span>工作台</span><span class="sp"></span><span id="nav-count" class="cnt"></span></button>
+    <button id="nav-settings" type="button" class="nav-item" data-nav="settings"><span>设置</span></button>
+  </nav>
+</aside>
+
 <header id="top" class="top" hidden>
-  <a id="brand" class="brand" href="#">Concierge</a>
-  <div class="top-right">
-    <button id="mac" type="button" class="mac" aria-expanded="false" aria-controls="mac-pop"><span class="dot" aria-hidden="true"></span><span id="mac-text">…</span></button>
-    <button id="settings-btn" type="button" class="icon-btn" aria-label="设置">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h9.5M18.5 7H20M4 17h3.5M12.5 17H20"/><circle cx="16" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/></g></svg>
-    </button>
+  <div class="top-bar">
+    <button id="back" type="button" class="back" hidden><svg class="i i-back" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7"/></svg><span id="back-text">工作台</span></button>
+    <a id="brand" class="brand wordmark" href="#">Concierge</a>
+    <h1 id="page-title" class="page-title">工作台</h1>
+    <span id="top-ref" class="top-ref"></span>
+    <span id="top-fresh" class="top-fresh"></span>
+    <button id="settings-btn" type="button" class="icon-btn gear" data-nav="settings" aria-label="设置"><svg class="i i-gear" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span id="gear-dot" class="gear-dot" hidden></span></button>
   </div>
-  <p id="receiver-line" class="receiver-line" role="status"></p>
+  <div id="status" class="status-lines">
+    <button id="mac" type="button" class="mac stat" aria-expanded="false" aria-controls="mac-pop"><span class="dot" aria-hidden="true"></span><span class="stat-body"><span id="mac-text" class="stat-t">…</span><span id="mac-sub" class="stat-sub mac-sub"></span></span></button>
+    <p id="receiver-line" class="receiver-line" role="status"></p>
+    <p id="gpt-line" class="gpt-line stat"></p>
+  </div>
   <div id="mac-pop" class="pop region" role="dialog" aria-label="Mac 在不在线" hidden></div>
 </header>
 
 <main id="app" hidden>
-  <div id="banner" class="banners region"></div>
   <div class="cols">
-    <div id="left" class="left">
-      <section class="compose" aria-label="说要什么">
+    <div id="banner" class="banners region"></div>
+    <div id="home" class="home">
+      <section id="compose" class="compose composer" aria-label="说要什么">
         <form id="compose-form" autocomplete="off" novalidate>
           <label class="sr-only" for="want">我要什么 / 哪里不对</label>
-          <textarea id="want" class="want" rows="4" maxlength="8000" placeholder="我要什么 / 哪里不对" enterkeyhint="enter"></textarea>
-          <label class="sr-only" for="extra">额外要求（可选）</label>
-          <input id="extra" class="extra" type="text" maxlength="2000" placeholder="额外要求（可选）" enterkeyhint="done">
-          <div id="chips" class="chips" role="group" aria-label="常用标签"></div>
-          <p id="chips-status" class="note chips-status" role="status"></p>
-          <div class="prefs-row">
-            <button id="prefs-open" type="button" class="prefs-open" aria-expanded="false" aria-controls="prefs-panel"><span id="prefs-summary">执行偏好：自动</span><span class="chev" aria-hidden="true">›</span></button>
-            <button id="prefs-reset" type="button" class="btn btn-quiet prefs-reset" hidden>恢复自动</button>
+          <textarea id="want" class="want" rows="1" maxlength="8000" placeholder="我要什么 / 哪里不对" enterkeyhint="enter" aria-describedby="compose-status"></textarea>
+          <div id="compose-more" class="compose-more" hidden>
+            <label class="sr-only" for="extra">额外要求（可选）</label>
+            <input id="extra" class="extra" type="text" maxlength="2000" placeholder="额外要求（可选）" enterkeyhint="done">
+            <div id="chips" class="chips" role="group" aria-label="常用标签"></div>
+            <p id="chips-status" class="note chips-status" role="status"></p>
           </div>
-          <div class="submit-row"><button id="submit" type="submit" class="btn btn-primary submit">提交任务</button></div>
-          <p id="compose-status" class="status compose-status" role="status"></p>
-          <div id="prefs-backdrop" class="backdrop" hidden></div>
-          <div id="prefs-panel" class="sheet prefs-panel" role="dialog" aria-label="执行偏好" hidden></div>
+          <div id="attach" class="attach region" role="group" aria-label="附件"></div>
+          <div class="compose-bar">
+            <div id="attach-tools" class="tools"></div>
+            <div class="tools">
+              <button id="prefs-reset" type="button" class="btn btn-quiet prefs-reset" hidden>恢复自动</button>
+              <button id="prefs-open" type="button" class="tbtn prefs-open" aria-haspopup="dialog" aria-expanded="false" aria-controls="prefs-panel" aria-label="执行偏好"><svg class="i i-gear" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span id="prefs-summary">执行偏好：自动</span></button>
+              <button id="submit" type="submit" class="send submit" aria-label="提交任务"><svg class="i i-send" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button>
+            </div>
+          </div>
         </form>
       </section>
-      <section class="resources" aria-labelledby="h-res">
-        <h2 id="h-res" class="sec-title">资源</h2>
-        <div id="quota" class="quota region"></div>
+      <p id="compose-status" class="status compose-status" role="status"></p>
+      <section id="filters" class="filters" aria-label="搜索与筛选">
+        <label class="search" for="q"><svg class="i i-search" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 1 0 0-13z"/><path d="M20 20l-4.3-4.3"/></svg><span class="sr-only">搜索任务（任务名、编号、原话）</span><input id="q" type="search" maxlength="100" placeholder="搜编号、名字、原话" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
+        <div id="filter-chips" class="filter-chips region"></div>
       </section>
-    </div>
-    <div class="right">
       <section aria-label="任务" class="tasks">
         <div id="tasklist" class="region"></div>
       </section>
-      <section id="taskpage" class="taskpage region" aria-label="任务详情" tabindex="-1" hidden></section>
     </div>
+    <section id="taskpage" class="taskpage region" aria-label="任务详情" tabindex="-1" hidden></section>
+    <section id="settings" class="settings region" aria-label="设置" tabindex="-1" hidden></section>
   </div>
 </main>
 
-<div id="settings-backdrop" class="backdrop backdrop-settings" hidden></div>
-<section id="settings" class="settings region" aria-label="设置" tabindex="-1" hidden></section>
 <div id="menu-backdrop" class="backdrop" hidden></div>
-<div id="chip-menu" class="sheet menu" role="menu" aria-label="整理标签" hidden></div>
+<div id="chip-menu" class="menu" role="menu" aria-label="整理标签" hidden></div>
+<dialog id="prefs-panel" class="ov ov-side prefs-panel" aria-labelledby="prefs-title"></dialog>
+<dialog id="ov" class="ov" aria-labelledby="ov-title"><div id="ov-in" class="ov-in region"></div></dialog>
+<dialog id="pairdlg" class="ov ov-dialog ov-pair" aria-labelledby="pairdlg-title"><div id="pairdlg-in" class="ov-in region"></div></dialog>
 <section id="pair" class="pair region" hidden></section>
 </body>
 </html>

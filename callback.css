@@ -1,0 +1,4 @@
+/* GitHub 授权回调那一页（server.mjs 的 ghPage，hub#165 §15.1 A′）：纯文字，不带脚本、不用内联样式（终审 P3-G） */
+body { font-family: -apple-system, system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.6; color: #1f1d1a; background: #fbfaf7; }
+h1 { font-size: 1.25rem; }
+@media (prefers-color-scheme: dark) { body { color: #ece8e1; background: #171614; } }

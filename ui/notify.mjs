@@ -88,10 +88,15 @@ function remoteSection(app) {
   const b = app.view?.board || {};
   const n = b.notify || null;
   const me = (b.devices || []).find((d) => d.id === app.transport.status().device?.id) || null;
-  // iPhone 在 Safari 里打开（不是主屏幕上的那个）：没有推送，只说怎么做
+  // iPhone 在 Safari 里打开（不是主屏幕上的那个）：Safari 里的页面收不到推送，只给引导、不给按钮（V2.md §9、NOTIFY.md §2）
   if (e.ios && !e.standalone) {
-    return section('通知',
-      h('p', { attrs: { id: 'notify-ios-hint' }, text: 'iPhone 上要先把这个页面添加到主屏幕（分享 → 添加到主屏幕），再从主屏幕上的 Concierge 图标打开，到这里点「开启通知」。之后 App 没开着也能收到。' }));
+    return section('通知', h('div', { class: 'notify-guide', attrs: { id: 'notify-ios-hint' } },
+      h('p', { text: '这是 Safari 里打开的页面，收不到推送。通知要从主屏幕的 Concierge 打开：' }),
+      h('ol', { class: 'steps', attrs: { id: 'notify-ios-steps' } },
+        h('li', { text: '在 Safari 里点分享 → 添加到主屏幕（已经添加过就跳过）。' }),
+        h('li', { text: '从主屏幕上的 Concierge 图标打开。它是另一套身份，第一次要单独连一次：在 Mac 上点「添加设备」→「复制链接」，回到 App 里粘贴。' }),
+        h('li', { text: '在那边的设置 → 通知 点「开启通知」，系统问时点允许；再点「发一条试试」。' })),
+      h('p', { class: 'note', text: 'Safari 这边的连接保留，可以照常用。之后 App 没开着也能收到通知。' })));
   }
   if (!e.supported) return null; // 这个浏览器不支持推送：不显示这一段
   const st = app.ui.push || {};
@@ -109,7 +114,7 @@ function remoteSection(app) {
     : h('div', { class: 'action-row' }, button(st.busy ? '正在开…' : '开启通知', () => enable(app), { primary: true, disabled: !!st.busy, attrs: { id: 'notify-enable' } }));
   return section('通知',
     h('div', { attrs: { id: 'notify-rows' } }, rows(list)),
-    h('p', { class: 'note', text: '有任务做完、要你批准或决定、卡住、领取了、Windows 一直没领取时，这台设备会收到一条系统通知。通知里只有任务名和一句状态，点开直接到这个任务；不在通知上批准。' }),
+    h('p', { class: 'note', text: '有任务做完、要你批准或决定、卡住、领取了、Windows 一直没领取时，这台设备会收到一条系统通知；按你提交时的预授权执行了一步、提前申请的动作过期没执行，也各通知一条。通知里只有任务名和一句状态，点开直接到这个任务；不在通知上批准。' }),
     buttons,
     st.error ? h('p', { class: 'status is-error', attrs: { role: 'status', id: 'notify-error' }, text: st.error }) : null,
     statusLine(act, { online: app.macOnline(), app }));
