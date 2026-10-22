@@ -55,6 +55,10 @@ export class GhError extends Error {
   constructor(message, { status = 0, definitive = false, code = null } = {}) { super(message); this.status = status; this.definitive = definitive; this.code = code; }
 }
 
+// 链接里带来的 GitHub App 授权（ghu_ 开头，#172）失效了：设备自己修不了（换令牌要 Mac 上的 client secret），修法在 Mac 上
+export const APP_TOKEN_DEAD = '这台设备的 GitHub 授权失效了（在 Mac 上被撤销了，或者过期了）。修法：在 Mac 上「设置 → 设备」把这台移除，再「添加设备」重新连接。';
+const PAT_DEAD = '令牌不对或已经过期。到设置里解除配对，再用新令牌配对';
+const deadText = (tok) => (/^ghu_/.test(String(tok || '')) ? APP_TOKEN_DEAD : PAT_DEAD);
 // HTTP 状态 → 一句人话。不带响应正文、不带请求头（里面有令牌）
 function httpError(status, headers) {
   const limited = headers?.get?.('x-ratelimit-remaining') === '0' || headers?.get?.('retry-after');
@@ -122,6 +126,7 @@ export function makeGithubTransport({
       });
     } catch { throw new GhError('连不上 GitHub（网络断了，或者被拦了）'); }
     if (r.status === 304) return { status: 304, data: null, etag };
+    if (r.status === 401) throw new GhError(deadText(auth), { status: 401, definitive: true });
     if (!r.ok) throw httpError(r.status, r.headers);
     let data = null;
     if (r.status !== 204) { try { data = await r.json(); } catch { data = null; } }
@@ -521,7 +526,7 @@ export function makeGithubTransport({
       return { changed: r.changed };
     } catch (e) {
       lastError = e.message;
-      if (e.status === 401) lastError = '令牌不对或已经过期。到设置里解除配对，再用新令牌配对';
+      if (e.status === 401) lastError = deadText(token);
       throw e;
     }
   }

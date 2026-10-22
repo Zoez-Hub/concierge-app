@@ -2,3 +2,11 @@
 body { font-family: -apple-system, system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.6; color: #1f1d1a; background: #fbfaf7; }
 h1 { font-size: 1.25rem; }
 @media (prefers-color-scheme: dark) { body { color: #ece8e1; background: #171614; } }
+/* #172 一键创建 GitHub App 的几页：步骤、一个提交按钮（交给 github.com）、回到 Concierge 的链接 */
+ol { padding-left: 1.25rem; }
+li { margin: 0.5rem 0; }
+a { color: inherit; word-break: break-all; }
+form { margin: 1.5rem 0; }
+button { font: inherit; min-height: 44px; padding: 0.5rem 1.25rem; border-radius: 10px; border: 1px solid #1A1D21; background: #1A1D21; color: #fff; cursor: pointer; }
+.go { margin-top: 1.25rem; }
+@media (prefers-color-scheme: dark) { button { background: #ECEDEF; border-color: #ECEDEF; color: #1A1D21; } }

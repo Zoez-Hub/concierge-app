@@ -986,7 +986,7 @@ figure.quote { margin: 0; display: flex; flex-direction: column; gap: 6px; min-w
 .pair-ask h2 { font-size: 17px; }
 .pair-ask-rows .row { grid-template-columns: 72px minmax(0, 1fr); }
 .gh-auth-go { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
-.gh-app-how ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+
 details.pair-confirm > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; min-height: 36px; display: flex; align-items: center; }
 /* hub#165 §15.2：权限页申请开启的那一行 */
 .dev.is-pending .dev-meta { color: var(--ink-2); }
@@ -1008,3 +1008,14 @@ details.pair-confirm > summary { cursor: pointer; color: var(--ink-2); font-size
 .pf-why { font-size: 12px; color: var(--muted); padding-left: 24px; overflow-wrap: anywhere; }
 .pf-item.is-sep .pf-why { padding-left: 0; }
 .preflight .check-label input { width: 16px; height: 16px; min-height: 0; padding: 0; margin: 2px 0 0; flex: none; -webkit-appearance: auto; appearance: auto; accent-color: var(--ink); }
+/* #172 F2：iPhone Safari 里扫码之后，推荐把链接复制到主屏幕 App 里连（「连接到 Zoe 的 Mac？」一屏的第一块）；主屏幕 App 起始屏「从剪贴板粘贴」 */
+.pair-home { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); }
+.pair-home-t, .pair-alt-t { font-size: 15px; margin: 0; }
+.pair-alt-t { margin-top: 4px; }
+.pair-home-steps { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; font-size: 13.5px; line-height: 1.55; }
+.pair-raw { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: var(--r-sm); background: var(--panel); overflow-wrap: anywhere; word-break: break-all; -webkit-user-select: all; user-select: all; }
+#pair-home-copy, #pair-ask-go, #pair-paste, #use-link, #gh-app-create { min-height: 44px; }
+/* #172 F1：设置 → 账号与模型 → 工程通道里的 GitHub App 一段 */
+.gh-app-setup { display: flex; flex-direction: column; gap: 8px; }
+.gh-app-setup ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+.gh-app-setup .action-row { justify-content: flex-start; }

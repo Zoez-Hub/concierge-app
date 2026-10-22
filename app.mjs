@@ -16,14 +16,19 @@ import { overlayContent, overlayShape, cardKey, forgetCards, deferredView } from
 import { renderSettings, wipePairing, pairDialog, pairDialogKey, pair as pairState } from './ui/settings.mjs';
 import { refreshPushState } from './ui/notify.mjs';
 import { renderPair, isIos, isStandalone } from './ui/pair.mjs';
+import { installLinkFlow } from './ui/pairflow.mjs';
 import { button, latest } from './ui/common.mjs';
 import { BUILD } from './build.mjs';
 
 // ---- 配对链接：在任何网络请求之前，先把片段从地址栏里抹掉（片段里有一次性密钥，可能还有令牌）----
 // 页面已经开着时再打开配对链接（只改了 # 后面）不会重新加载，所以 hashchange 时也走这里。
+// 原样的链接（地址 + #pair=…）另外留一份在内存里（#172）：iPhone 的 Safari 里扫码打开时，页面推荐把它复制到主屏幕 App 里去连。
+// 只在内存里（pairRaw / app.pair.rawLink），不存、不发；连好或者取消就丢
+let pairRaw = null;
 function takePairHash() {
   const raw = location.hash;
   if (!raw.startsWith('#pair=')) return null;
+  pairRaw = location.origin + location.pathname + raw;
   history.replaceState(null, '', location.pathname + location.search);
   return decodePairFragment(raw) || 'bad';
 }
@@ -193,7 +198,8 @@ window.addEventListener('hashchange', () => {
     if (app.local) app.flash('这是 Mac 本机上的页面。连接链接要在要连接的那台设备上打开。');
     // 已经配好的设备：不悄悄换掉钉住的 Mac，先问一句（终审 F1e）
     else if (app.transport.status().paired) { app.pair = { step: 'link-replace', frag: f }; render(); }
-    else { pairFragBad = false; app.startLink(f); }
+    else { pairFragBad = false; app.startLink(f, { rawLink: pairRaw }); }
+    pairRaw = null;
     return;
   }
   onRoute();
@@ -353,7 +359,7 @@ function renderPairDialog() {
   const d = $('pairdlg');
   const want = pairState.open && app.local && app.route.name === 'settings';
   if (!want) { if (d.open) d.close(); $('pairdlg-in')._key = null; if ($('pairdlg-in').childElementCount) $('pairdlg-in').replaceChildren(); if (pairState.open && app.route.name !== 'settings') wipePairing(); return; }
-  paint($('pairdlg-in'), JSON.stringify([pairDialogKey(), app.devices?.devices?.map((x) => x.id), app.devices?.devices?.length, minute()]), () => pairDialog(app));
+  paint($('pairdlg-in'), JSON.stringify([pairDialogKey(), app.devices?.devices?.map((x) => x.id), app.devices?.devices?.length, app.devices?.remote?.pairError?.at || null, minute()]), () => pairDialog(app));
   if (!d.open) { d.showModal(); $('pairdlg-title')?.focus(); }
 }
 $('pairdlg').addEventListener('cancel', (e) => { e.preventDefault(); wipePairing(); render(); });
@@ -469,35 +475,8 @@ function renderPairScreen() {
   });
 }
 
-// replace：已经配好的设备换成这次的配对（她在“要换成这次的配对吗？”上点了“换”，终审 F1e）
-// 第一次配对（hub#165 §15.1）：先一屏「连接到 Zoe 的 Mac？」（Mac、这台设备、连接 / 取消），她点了「连接」才往下走
-app.startLink = (frag, { replace = false } = {}) => {
-  if (!replace) { app.pair = { step: 'link-confirm', frag }; render(); return; }
-  app.pairLink(frag, null, { replace });
-};
-// 「连接到 Zoe 的 Mac？」上点了「连接」：链接里带着 GitHub 授权（Mac 启用了 GitHub App）直接连；没带 → 「首次连接需要一次 GitHub 授权」那一屏
-app.confirmLink = () => {
-  const frag = app.pair.frag;
-  if (!frag) return;
-  if (!frag.t) { app.pair = { step: 'link-token', frag }; render(); return; }
-  app.pairLink(frag, null);
-};
-app.pairLink = async (frag, token, { replace = app.pair.replace === true } = {}) => {
-  const back = app.pair.step === 'link-replace' ? 'link-replace' : app.pair.step === 'link-confirm' ? 'link-confirm' : 'link-token';
-  app.pair = { ...app.pair, step: back, frag, busy: true, error: null, replace };
-  render();
-  try {
-    await app.transport.pairByLink(frag, { label: isIos() && isStandalone() ? `${app.defaultLabel} 主屏幕` : app.defaultLabel, token, replace }); // 主屏幕 App 名字带“主屏幕”（设备页据此标徽章）
-    app.pair = { step: 'waiting' }; // 配对密钥用过就不留在内存里
-  } catch (e) {
-    const error = e.status === 401 && back === 'link-token' ? '访问凭据无效或已到期。请在当前页重新粘贴有效凭据；需要新建时按创建步骤操作。'
-      : e.status === 401 && back === 'link-confirm' ? '链接里带的 GitHub 授权用不了了（过期或者被撤销）。在 Mac 上重新点「添加设备」。' : e.message;
-    app.pair = { step: back, frag, busy: false, error, replace };
-  }
-  render();
-  tick();
-};
-app.cancelReplace = () => { app.pair = { step: 'start' }; render(); };
+// 链接配对：startLink / confirmLink / pairLink / cancelReplace（web/ui/pairflow.mjs，带代次：取消之后回来的旧结果作废，#172 复审）
+installLinkFlow(app, { render: () => render(), tick: () => tick() });
 // 配对码的反方向确认：把 Mac 上显示的 6 位数字交给设备核对（终审 F1d）
 app.confirmCode = async (digits) => {
   const p = app.pair;
@@ -618,9 +597,10 @@ async function boot() {
     app.view = app.transport.view(); // 上一次的视图先画出来，网络回来再更新
     await enter();
   } else if (pairFrag && !app.local) {
-    app.startLink(pairFrag);
+    app.startLink(pairFrag, { rawLink: pairRaw });
     pairFrag = null;
   }
+  pairRaw = null;
   render();
   tick();
 }

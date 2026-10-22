@@ -114,6 +114,8 @@ export function makeLocalTransport({ fetch = globalThis.fetch.bind(globalThis), 
     startPair: (label) => call('POST', 'api/pair/start', { label }),
     // { state:'waiting'|'ready'|'expired'|'none', t? }：ready 时 t 是这台新设备的 GitHub 令牌（只放进配对链接，不存）
     pairToken: (pairId) => call('POST', 'api/pair/token', { pairId }),
+    // 一键创建 GitHub App（#172）：{ url }——本机的创建页（一次性，60 分钟），页面跳过去
+    ghAppStart: () => call('POST', 'api/gh/app/start', {}),
     // 敲设备上显示的配对码。成功 { ok:true, id, label, already, confirm? }；失败不抛，返回 { ok:false, status, error }（界面按状态码说人话）。
     // 总是要旧的 6 位回显（?legacyConfirm=1，hub#165 §15.1）：Mac 不知道那台设备的页面有没有内置 Mac 公钥——内置了的设备自己显示「已连接」，
     // 没内置的（本地源码 / 没发布过的页面）还在等这 6 位。页面把它折起来，设备上要了才去看

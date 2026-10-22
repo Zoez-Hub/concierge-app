@@ -87,19 +87,50 @@ function replaceScreen(app) {
 
 // 「连接到 Zoe 的 Mac？」（hub#165 §15.1）：扫码 / 粘贴链接之后先问一句。Mac 的名字看板里没有，写“Mac”；这台设备写它自己报的名字和是哪种身份
 export const linkLabel = (app) => (isIos() && isStandalone() ? `${app.defaultLabel} 主屏幕` : app.defaultLabel);
+// iPhone 的 Safari 里扫码打开（#172 F2）：相机扫码只会在 Safari 里打开，可手机通知只有主屏幕上的 Concierge 能收，
+// 两边存的东西不通——所以先推荐“把这条链接复制到主屏幕 App 里去连”。复制在点击里直接调剪贴板（iOS 要求在手势里）；
+// 复制不了就把链接显示出来让她自己长按选中。链接只在内存里（app.pair.rawLink），不存
+export const HOME_STEPS = ['在 Safari 里点分享 → 添加到主屏幕（已经添加过就跳过）。', '点下面的「复制连接链接」。', '从主屏幕打开 Concierge，粘贴，点「连接」。'];
+export const HOME_ONCE = '同一条链接只能连一台：在主屏幕 App 里连了，这里就不要再点连接；10 分钟内有效。';
+export const CLIP_NOTE = '链接里含这台设备的连接授权，不要转发；连好之后复制点别的内容覆盖剪贴板。';
+function homeHandoff(app) {
+  const p = app.pair;
+  const raw = typeof p.rawLink === 'string' ? p.rawLink : '';
+  const copy = () => {
+    let done;
+    try { done = globalThis.navigator?.clipboard?.writeText ? globalThis.navigator.clipboard.writeText(raw) : Promise.reject(new Error('no clipboard')); } catch (e) { done = Promise.reject(e); }
+    return Promise.resolve(done).then(() => { p.copyState = 'ok'; }, () => { p.copyState = 'fail'; }).then(() => app.render());
+  };
+  return h('div', { class: 'pair-home', attrs: { id: 'pair-home', role: 'group', 'aria-labelledby': 'pair-home-t' } },
+    h('h3', { class: 'pair-home-t', attrs: { id: 'pair-home-t' }, text: '推荐：在主屏幕 App 里连接' }),
+    h('p', { text: '手机通知只有主屏幕上的 Concierge 能收，Safari 里的收不到。' }),
+    h('ol', { class: 'pair-home-steps' }, HOME_STEPS.map((x) => h('li', { text: x }))),
+    raw ? h('div', { class: 'action-row' }, button('复制连接链接', copy, { primary: true, attrs: { id: 'pair-home-copy' } })) : null,
+    p.copyState === 'ok' ? h('p', { class: 'status is-done', attrs: { role: 'status', id: 'pair-home-copied' }, text: '已复制。现在从主屏幕打开 Concierge，粘贴，点「连接」。' }) : null,
+    // 复制不了（或者没拿到原样的链接）：把链接摆出来，长按就能全选
+    raw && p.copyState === 'fail' ? h('p', { class: 'note', attrs: { role: 'status' }, text: '复制不了。长按下面这段，全选、拷贝：' }) : null,
+    raw && p.copyState === 'fail' ? h('p', { class: 'pair-raw', attrs: { id: 'pair-raw' }, text: raw }) : null,
+    h('p', { class: 'note', text: HOME_ONCE }),
+    // 链接里含这台设备的连接授权（复审 8）：一次性和 10 分钟管的是连接邀请，链接里的授权本身连好之后还有效
+    h('p', { class: 'note', attrs: { id: 'pair-home-clip' }, text: CLIP_NOTE }));
+}
 function confirmScreen(app) {
   const p = app.pair;
   const dk = deviceKind();
+  const safari = isIos() && !isStandalone();
   return h('section', { class: 'block pair-ask', attrs: { id: 'pair-ask' } }, h('h2', { text: '连接到 Zoe 的 Mac？' }),
     h('dl', { class: 'rows pair-ask-rows' },
       h('div', { class: 'row' }, h('dt', { text: 'Mac' }), h('dd', { text: 'Mac（链接里的那一台）' })),
       h('div', { class: 'row' }, h('dt', { text: '这台设备' }), h('dd', { text: `${linkLabel(app)} · ${dk.text}` }))),
+    safari ? homeHandoff(app) : null,
+    safari ? h('h3', { class: 'pair-alt-t', attrs: { id: 'pair-alt-t' }, text: '或者就在 Safari 里连接' }) : null,
     h('p', { text: '连接之后，这台设备能看任务、提交、回答问题、做真机验收。批准动作要另外在「权限」里开启手机批准；敏感操作仍然只在 Mac 上批。' }),
     p.frag && !p.frag.t ? h('p', { class: 'note', text: '这个浏览器第一次连接：点「连接」之后还要做一次 GitHub 授权。' }) : null,
     h('p', { class: 'note', text: '不是你刚在 Mac 上点的「添加设备」，就点「取消」。链接 10 分钟内有效，只能用一次。' }),
     p.error ? h('p', { class: 'status is-error', attrs: { role: 'status' }, text: p.error }) : null,
     h('div', { class: 'action-row' },
-      button(p.busy ? '正在连接…' : '连接', () => app.confirmLink(), { primary: true, disabled: !!p.busy, attrs: { id: 'pair-ask-go' } }),
+      // Safari 里「连接」是第二选择（推荐的是上面的复制）：不用实心按钮
+      button(p.busy ? '正在连接…' : '连接', () => app.confirmLink(), { primary: !safari, disabled: !!p.busy, attrs: { id: 'pair-ask-go' } }),
       button('取消', () => app.cancelReplace(), { cls: 'btn-quiet' })));
 }
 
@@ -171,7 +202,7 @@ export function renderPair(app) {
       gh.node,
       p.error ? h('p', { class: 'status is-error', text: p.error }) : null,
       h('div', { class: 'action-row' }, button(p.busy ? '正在连接…' : '连接', () => app.pairLink(p.frag, gh.tok.value.trim()), { primary: true, disabled: !!p.busy }),
-        button('取消', () => { app.pair = { step: 'start' }; app.render(); }, { cls: 'btn-quiet' })),
+        button('取消', () => app.cancelReplace(), { cls: 'btn-quiet' })),
       h('p', { class: 'note', text: 'Mac 的邀请 10 分钟内有效；过期了在 Mac 上重新「添加设备」，已经建好的令牌不用重建。' })));
     return out;
   }
@@ -217,9 +248,25 @@ export function renderPair(app) {
     linkIn.value = ''; p.linkText = '';
     if (!frag) { p.linkError = '这不是有效的连接链接。在 Mac 上重新点「添加设备」，再复制一次。'; app.render(); return; }
     p.linkError = null;
-    app.startLink(frag);
+    app.startLink(frag, { rawLink: raw });
   };
   linkIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); useLink(); } });
+  // 从剪贴板粘贴（#172 F2）：主屏幕 App 里从 Safari 复制过来的链接一下就进来。读剪贴板要在点击里（iOS 会弹一个「粘贴」气泡）；
+  // 读不到（拒绝了 / 浏览器不给）→ 把焦点给输入框，提示长按选「粘贴」
+  const clip = globalThis.navigator?.clipboard;
+  const paste = typeof clip?.readText === 'function' ? button('从剪贴板粘贴', () => {
+    let got;
+    try { got = clip.readText(); } catch (e) { got = Promise.reject(e); }
+    return Promise.resolve(got).then((text) => {
+      linkIn.value = String(text || '').trim();
+      p.pasteHint = null;
+      useLink();
+    }, () => {
+      p.pasteHint = '读不到剪贴板。长按上面的输入框，选「粘贴」，再点「连接」。';
+      app.render();
+      globalThis.document?.getElementById?.('pair-link')?.focus?.();
+    });
+  }, { attrs: { id: 'pair-paste' } }) : null;
   out.push(
     h('p', { class: 'lead', text: '把这台设备连到 Mac 上的 Concierge。连好之前，这里不显示任何任务。' }),
     h('p', { class: 'pair-intro', attrs: { id: 'pair-intro' } }, h('span', { class: 'label', text: '这台设备 ' }), h('span', { text: identity })),
@@ -228,7 +275,8 @@ export function renderPair(app) {
       h('p', { text: '在 Mac 上打开 Concierge → 设置 → 设备 →「添加设备」，点「复制链接」，粘贴到这里（iPhone 和 Mac 之间可以用通用剪贴板）。' }),
       h('label', { class: 'sr-only', htmlFor: 'pair-link', text: '连接链接' }), linkIn,
       p.linkError ? h('p', { class: 'status is-error', text: p.linkError }) : null,
-      button('连接', useLink, { primary: true, attrs: { id: 'use-link' } })),
+      p.pasteHint ? h('p', { class: 'note', attrs: { role: 'status', id: 'pair-paste-hint' }, text: p.pasteHint }) : null,
+      h('div', { class: 'action-row' }, button('连接', useLink, { primary: true, attrs: { id: 'use-link' } }), paste)),
     h('section', { class: 'block pair-way', attrs: { 'data-way': 'scan' } }, h('h2', { text: '扫码' }),
       h('p', { text: dk.kind === 'ios-app'
         ? '主屏幕 App 里扫不了：相机扫码会在 Safari 里打开，那是另一个身份。这里用上面的「粘贴连接链接」。'

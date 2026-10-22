@@ -19,7 +19,7 @@ import * as C from '../lib/choices.mjs';
 import { phoneApprovalSection, macPasskeyControl } from './passkey.mjs';
 import { renderNotify } from './notify.mjs';
 import { renderQuota } from './resources.mjs';
-import { deviceKind } from './pair.mjs';
+import { deviceKind, CLIP_NOTE } from './pair.mjs'; // CLIP_NOTE：链接里带着这台新设备的授权时，复制之后提醒一句（#172 复审 8）
 import { icon } from './icons.mjs';
 
 // 只在内存里的「添加设备」状态（不进任何存储）。gh：GitHub App 那一步（{ authUrl, expiresAt, state:'waiting'|'expired'|'used' }）；
@@ -32,7 +32,7 @@ const code = { text: '', busy: false, result: null, coordinator: false };
 
 export function wipePairing() {
   pair.open = false; pair.url = null; pair.expiresAt = null; pair.error = null; pair.busy = false; pair.startDevices = null; pair.copied = null;
-  pair.pairId = null; pair.gh = null; pair.appOn = null; fragBase = null;
+  pair.pairId = null; pair.gh = null; pair.appOn = null; pair.startedAt = null; fragBase = null;
   code.text = ''; code.busy = false; code.result = null; code.coordinator = false;
 }
 
@@ -103,16 +103,43 @@ function models(app) {
 
 // 工程通道：各设备往来都经 GitHub，每台设备用自己的一把凭据。这里只写有 / 没有 / 过期日期不可知，从不显示值（Mac 也不保管别的设备的）。
 // 这一段是 §0 语言规则的例外（和 GitHub 授权那一屏一样）：要写 GitHub App、令牌这些原名，不然她在 GitHub 设置里找不到
-// GitHub App（hub#165 §15.1 A′）：启用没有；没启用时「怎么开启」折叠（docs/REMOTE.md §3.4 的五步）
-function ghAppHow() {
-  return h('details', { class: 'help gh-app-how', attrs: { id: 'gh-app-how' } }, h('summary', { text: '怎么开启（一次性，要你本人在 GitHub 上做）' }),
-    h('ol', {},
-      h('li', { text: 'GitHub → Settings → Developer settings → GitHub Apps → New GitHub App：权限只开 Repository permissions → Issues: Read and write；Callback URL 填 http://127.0.0.1:4400/api/gh/callback；取消勾选 Webhook 的 Active；User-to-server token expiration 选 Opt-out；Where can this GitHub App be installed 选 Only on this account。' }),
-      h('li', { text: 'Install App → Only select repositories → 只选 Concierge 用的那个仓库。' }),
-      h('li', { text: 'Generate a new client secret，在 Mac 终端把它存进钥匙串：security add-generic-password -s concierge-github-app -a concierge -w （后面跟这个 client secret）。' }),
-      h('li', { text: '把 App 的 Client ID 写进 Concierge 配置的 remote.githubApp.clientId，enabled 改成 true，重启 Concierge。' }),
-      h('li', { text: '第一次在 Mac 上「添加设备」时，在 GitHub 授权页点一次 Authorize。之后新设备扫码就能直接连上，不用它自己再做 GitHub 授权。' })),
-    h('p', { class: 'note', text: '开启之后每台新设备拿到的是这个 App 给它单独换的一把授权（只给这个仓库的任务读写），Mac 上移除设备时一并撤销。' }));
+// GitHub App（hub#165 §15.1 A′ → #172）：只在 Mac 本机页面。
+//   没建：「创建 GitHub App」（POST /api/gh/app/start → 跳到本机的创建页，一个按钮把设置交给 GitHub）+ 两行说明；
+//   建好了、第一次发授权还没核对过：两条链接（安装、关令牌过期）+ 第三步回来「添加设备」；核对过了就只剩一行状态。
+//   手工五步（自己建 App、终端存钥匙串、改配置）只留在 docs/REMOTE.md §3.4 作备用
+// 仓库名从 Mac 来（GET /api/devices 的 remote.githubApp.repo）：托管副本是公开的，页面源码里不写仓库名
+export const ghAppWhat = (repo) => `让新设备扫码直接连上，不用自己去 GitHub 建授权；只给 ${repo || 'Concierge 用的那个仓库'} 的 Issues 读写，只装在这一个仓库上。`;
+export const GH_APP_CLICKS = '你要在 GitHub 上点 3 下：创建、安装（只选这一个仓库）、关掉授权过期。client secret 由 Mac 直接放进钥匙串，你不用碰。';
+const ghApp = { busy: false, error: null };
+function ghAppSetup(app, g) {
+  if (!g || g.allowed === false) return null;
+  if (!g.setup) {
+    const go = button(ghApp.busy ? '正在打开…' : '创建 GitHub App', async () => {
+      if (ghApp.busy) return;
+      ghApp.busy = true; ghApp.error = null; app.render();
+      try {
+        const r = await app.transport.ghAppStart();
+        // 跳到本机的创建页（同一个标签页：异步拿到地址之后开新窗口会被拦）；那一页的按钮把设置交给 GitHub，建好后 GitHub 跳回 Mac
+        if (r?.url && /^http:\/\/127\.0\.0\.1:\d+\/api\/gh\/app\/new\?state=/.test(r.url)) globalThis.location?.assign?.(r.url);
+        else throw new Error('Mac 没有给出创建页的地址');
+      } catch (e) { ghApp.error = e.message || '出错了'; }
+      ghApp.busy = false; app.render();
+    }, { primary: true, disabled: ghApp.busy, attrs: { id: 'gh-app-create' } });
+    return h('div', { class: 'gh-app-setup', attrs: { id: 'gh-app-setup', 'data-state': 'none' } },
+      h('p', { text: ghAppWhat(g.repo) }), h('p', { class: 'note', text: GH_APP_CLICKS }),
+      h('div', { class: 'action-row' }, go),
+      ghApp.error ? h('p', { class: 'status is-error', attrs: { role: 'status' }, text: ghApp.error }) : null);
+  }
+  if (g.setup === 'page' && !g.proven) {
+    const step = (n, label, href, after) => h('li', {}, h('span', { text: `${n} ` }), link(href, label), h('span', { text: after }));
+    return h('div', { class: 'gh-app-setup', attrs: { id: 'gh-app-setup', 'data-state': 'pending' } },
+      h('p', { text: `已经建好（${g.slug}）。还差两步，都在 GitHub 上点：` }),
+      h('ol', {},
+        step('①', '安装', g.installUrl, ` → 选 Only select repositories → 只选 ${g.repo || '这一个仓库'} → Install。`),
+        step('②', '关令牌过期', g.settingsUrl, ' → 左侧 Optional features → User-to-server token expiration → Opt-out。'),
+        h('li', { text: '③ 回到 设置 → 设备 →「添加设备」。第一次在 GitHub 上授权时，Mac 会核对前两步；没做好会说哪里要改，不会把授权交给新设备。' })));
+  }
+  return null;
 }
 function channel(app) {
   const b = app.view?.board || {};
@@ -120,13 +147,19 @@ function channel(app) {
   let appBlock = null;
   if (app.local) {
     const r = app.devices?.remote;
-    const appOn = r?.githubApp?.enabled === true;
+    const g = r?.githubApp || null;
+    const appOn = g?.enabled === true;
     list.push(['Mac', !r ? '正在读取…' : !r.enabled ? '远端通道没开，现在用不到' : r.lastPublishAt ? `有（${F.when(r.lastPublishAt)} 用过）· 过期日期不可知` : '还没用过 · 过期日期不可知']);
-    list.push(['GitHub App', !r ? '正在读取…' : appOn ? '已启用：「添加设备」时给新设备换一把它专用的授权，新设备扫码直接连上' : '没启用：新设备第一次连接时要自己准备一次 GitHub 授权']);
+    list.push(['GitHub App', !r ? '正在读取…'
+      : g?.fault ? g.fault
+      : g?.allowed === false ? '在配置里关掉了：新设备第一次连接时要自己准备一次 GitHub 授权'
+      : appOn && g?.setup === 'page' && !g.proven ? `已建好（${g.slug}），还差安装和关令牌过期两步（见下面）`
+      : appOn ? `已启用${g?.slug ? `（${g.slug}）` : ''}：「添加设备」时给新设备换一把它专用的授权，新设备扫码直接连上`
+      : '还没建：新设备第一次连接时要自己准备一次 GitHub 授权']);
     for (const x of (app.devices?.devices || []).filter((d) => d && d.role !== 'coordinator')) {
       list.push([x.label || '设备', x.ghCredAt ? `有（GitHub App ${F.dayTime(x.ghCredAt)} 给的）· 过期日期不可知` : '有（连接时它自己准备的，只存在那台设备上）· 现在有没有、什么时候过期这里看不到']);
     }
-    appBlock = r && !appOn ? ghAppHow() : null;
+    appBlock = r ? ghAppSetup(app, g) : null;
   } else {
     const st = app.transport.status();
     list.push(['这台设备', st.paired ? '有（连接时保存在这台设备上）· 过期日期不可知' : '没有']);
@@ -248,14 +281,27 @@ function devicesPage(app) {
       h('span', { class: 'hint-t' }, h('span', { class: 'hint-s', text: app.ui.ghRevokeNote })),
       button('知道了', () => { app.ui.ghRevokeNote = null; app.render(); }, { cls: 'btn-quiet btn-small' })));
   }
-  // Mac 记着的撤销待办（第十轮复核 F）：来自 GET /api/devices.ghRevokes，刷新、重启入口都还在，直到撤掉或点「知道了」
-  for (const p of Array.isArray(app.devices?.ghRevokes) ? app.devices.ghRevokes : []) {
+  // Mac 记着的撤销待办（第十轮复核 F）：来自 GET /api/devices.ghRevokes，刷新、重启入口都还在，直到撤掉。
+  // 「知道了」（#172 第二轮复核）只是收起：撤销材料还在、Mac 照常自动再试；收起的折在「已收起的撤销待办」里，「再试一次」照样能点
+  const revokeCard = (p, { hidden = false } = {}) => {
     const row = F.ghRevokeRow(p);
-    parts.push(h('div', { class: 'hint-card', attrs: { role: 'status', 'data-k': 'gh-revoke', 'data-state': p.state || null } },
+    return h('div', { class: 'hint-card', attrs: { role: 'status', 'data-k': 'gh-revoke', 'data-state': p.state || null, ...(hidden ? { 'data-hidden': '1' } : {}) } },
       h('span', { class: 'hint-i', attrs: { 'aria-hidden': 'true' }, text: '!' }),
       h('span', { class: 'hint-t' }, h('span', { class: 'hint-s', text: row.text })),
-      row.canRetry ? button('再试一次', async () => { await app.act(() => app.transport.ghRevokeRetry(p.key)); await app.loadDevices(); }, { cls: 'btn-quiet btn-small' }) : null,
-      button('知道了', async () => { await app.act(() => app.transport.ghRevokeDismiss(p.key)); await app.loadDevices(); }, { cls: 'btn-quiet btn-small' })));
+      row.canRetry ? button('再试一次', async () => {
+        // 撤销接口在限流时 Mac 不发请求、回一句几点后自动再试（#172 第三轮复核）：显示在设备列表上面
+        let out = null;
+        await app.act(async () => { out = await app.transport.ghRevokeRetry(p.key); return out; });
+        if (out && out.ok === false && out.error) (app.ui ||= {}).ghRevokeNote = String(out.error);
+        await app.loadDevices();
+      }, { cls: 'btn-quiet btn-small' }) : null,
+      hidden ? null : button('知道了', async () => { await app.act(() => app.transport.ghRevokeDismiss(p.key)); await app.loadDevices(); }, { cls: 'btn-quiet btn-small' }));
+  };
+  const revokes = Array.isArray(app.devices?.ghRevokes) ? app.devices.ghRevokes : [];
+  for (const p of revokes.filter((x) => !x.hidden)) parts.push(revokeCard(p));
+  const folded = revokes.filter((x) => x.hidden);
+  if (folded.length) {
+    parts.push(h('details', { class: 'help gh-revoke-folded', attrs: { 'data-k': 'gh-revoke-folded' } }, h('summary', { text: `已收起的撤销待办（${folded.length}）· Mac 照常自动再试` }), ...folded.map((p) => revokeCard(p, { hidden: true }))));
   }
   parts.push(h('ul', { class: 'devlist' }, macRow(app), ...list.map((x) => devRow(app, x, { manage: true, old: old.has(x.id) })), ...receiverRowsOf(app)));
   if (dv && r.enabled) {
@@ -288,6 +334,7 @@ async function startPair(app) {
     fragBase = { app: String(s.appUrl).split('#')[0], o: s.owner, r: s.repo, i: s.stateIssue, p: s.pairId, k: s.secret, m: s.mac.pub };
     pair.pairId = s.pairId;
     pair.expiresAt = s.expiresAt;
+    pair.startedAt = new Date().toISOString();
     pair.startDevices = (app.devices?.devices || []).map((x) => x.id);
     if (s.github?.authUrl) {
       pair.appOn = true;
@@ -301,16 +348,26 @@ async function startPair(app) {
   pair.busy = false;
   app.render();
 }
-// GitHub 授权完了没有（POST /api/pair/token）：ready 时拿到这台新设备的授权，放进链接的 t（不存、不显示）
+// GitHub 授权完了没有（POST /api/pair/token）：ready 时拿到这台新设备的授权，放进链接的 t（不存、不显示）。
+// processing：GitHub 跳回来了，Mac 在换令牌、核对仓库（接着等）；failed：没成（Mac 给的原因 +「再试一次」）。
+// none（#172 复审 2）：**不**当成“App 没开”——先重读设备列表，只有 Mac 说 GitHub App 关了（githubApp.enabled === false）才退回不带 t 的链接；
+// 否则是这次的授权找不到了（Concierge 多半重启过），给「再试一次」
+const LIVE = ['waiting', 'processing'];
 export async function pollToken(app, pairId) {
-  if (!pair.open || pair.pairId !== pairId || pair.gh?.state !== 'waiting' || !fragBase) return;
+  if (!pair.open || pair.pairId !== pairId || !LIVE.includes(pair.gh?.state) || !fragBase) return;
   let r = null;
   try { r = await app.transport.pairToken(pairId); } catch { r = null; }
-  if (!pair.open || pair.pairId !== pairId || !fragBase) return;
+  if (!pair.open || pair.pairId !== pairId || !fragBase || !pair.gh) return;
   if (r?.state === 'ready' && r.t) { pair.gh.state = 'ready'; pair.url = pairUrl(fragBase, r.t); app.render(); return; }
   if (r?.state === 'expired' || r?.state === 'used') { pair.gh.state = r.state; app.render(); return; }
-  // Mac 上 GitHub App 中途关了：退回没有 t 的链接（新设备自己授权）
-  if (r?.state === 'none') { pair.gh = null; pair.appOn = false; pair.url = pairUrl(fragBase); app.render(); return; }
+  if (r?.state === 'failed') { pair.gh.state = 'failed'; pair.gh.error = String(r.error || 'GitHub 授权没完成。').slice(0, 400); app.render(); return; }
+  if (r?.state === 'none') {
+    try { await app.loadDevices(); } catch { /* 读不到就按“找不到了”处理 */ }
+    if (!pair.open || pair.pairId !== pairId || !fragBase || !pair.gh) return;
+    if (app.devices?.remote?.githubApp?.enabled === false) { pair.gh = null; pair.appOn = false; pair.url = pairUrl(fragBase); app.render(); return; }
+    pair.gh.state = 'lost'; app.render(); return;
+  }
+  if (r?.state === 'processing' && pair.gh.state !== 'processing') { pair.gh.state = 'processing'; app.render(); }
   setTimeout(() => pollToken(app, pairId), 1500);
 }
 
@@ -359,6 +416,8 @@ export function pairDialog(app) {
   // 用连接码连上的：留在这一屏给她看 6 位确认码（要敲回设备上），不跳完成态
   const newDev = pair.url && pair.startDevices && !code.result?.ok ? list.find((x) => !pair.startDevices.includes(x.id)) : null;
   const close = () => { wipePairing(); app.render(); };
+  const pe = app.devices?.remote?.pairError;
+  const pairErr = pe && pair.startedAt && Date.parse(pe.at) >= Date.parse(pair.startedAt) ? pe.text : null;
   const head = h('div', { class: 'ov-h' }, h('h2', { id: 'pairdlg-title', text: '添加设备', tabIndex: -1 }),
     h('button', { type: 'button', class: 'ov-x', attrs: { 'aria-label': '关闭' }, on: { click: close } }, icon('x')));
   let body;
@@ -372,13 +431,15 @@ export function pairDialog(app) {
     const go = link(pair.gh.authUrl, '打开 GitHub 授权页');
     go.classList.add('btn', 'btn-primary', 'gh-auth-go');
     go.id = 'gh-auth-go';
-    body = pair.gh.state === 'waiting' ? [h('p', { class: 'pair-big', text: '先在 GitHub 上授权一次' }),
+    body = LIVE.includes(pair.gh.state) ? [h('p', { class: 'pair-big', text: pair.gh.state === 'processing' ? 'GitHub 授权回来了，正在核对' : '先在 GitHub 上授权一次' }),
       h('p', { class: 'note center', text: '给这台新设备换一把它专用的授权（只给这个仓库的任务读写），链接里带着它，新设备扫了直接连上。第一次要在 GitHub 上点一次 Authorize；授权过的会直接跳回。' }),
       h('div', { class: 'action-row center' }, go),
       h('p', { class: 'waiting', attrs: { role: 'status', id: 'gh-wait' } }, h('span', { class: 'breath', attrs: { 'aria-hidden': 'true' } }),
-        h('span', { text: `等 GitHub 授权…（授权完这里自动出二维码${pair.gh.expiresAt ? `，${F.clock(pair.gh.expiresAt)} 前有效` : ''}）` })),
+        h('span', { text: pair.gh.state === 'processing' ? '正在换这台新设备的授权、核对它只能看到这一个仓库…（好了这里自动出二维码）' : `等 GitHub 授权…（授权完这里自动出二维码${pair.gh.expiresAt ? `，${F.clock(pair.gh.expiresAt)} 前有效` : ''}）` })),
       codeBox(app)]
-      : [h('p', { class: 'status is-error', attrs: { role: 'status' }, text: pair.gh.state === 'used' ? '这次的 GitHub 授权已经用过了。' : 'GitHub 授权超时了（10 分钟）。' }),
+      : [h('p', { class: 'status is-error', attrs: { role: 'status', id: 'gh-fail' }, text: pair.gh.state === 'used' ? '这次的 GitHub 授权已经用过了。'
+        : pair.gh.state === 'failed' ? (pair.gh.error || 'GitHub 授权没完成。')
+          : pair.gh.state === 'lost' ? '这次的 GitHub 授权找不到了（Concierge 可能刚重启过）。' : 'GitHub 授权超时了（10 分钟）。' }),
         h('div', { class: 'action-row center' }, button('再试一次', () => startPair(app), { cls: 'btn-small' }))];
   } else if (!pair.url) {
     body = [h('p', { class: 'pair-big', text: '让新设备扫这个码' }),
@@ -388,12 +449,16 @@ export function pairDialog(app) {
   } else {
     const canvas = h('canvas', { class: 'qr', attrs: { role: 'img', 'aria-label': '连接二维码：用要连接的设备扫' } });
     try { drawQr(canvas, pair.url); } catch { pair.error = '二维码画不出来（链接太长）'; }
-    const copyBtn = button('复制链接', async () => { const ok = await app.copy(pair.url); pair.copied = ok ? '已复制。在主屏幕 App 或 Windows 上粘贴到「粘贴连接链接」。' : '复制不了。'; app.render(); }, { cls: 'btn-small' });
+    const copyBtn = button('复制链接', async () => { const ok = await app.copy(pair.url); pair.copied = ok ? `已复制。在主屏幕 App 或 Windows 上粘贴到「粘贴连接链接」。${pair.appOn ? CLIP_NOTE : ''}` : '复制不了。'; app.render(); }, { cls: 'btn-small' });
     body = [h('p', { class: 'pair-big', text: '让新设备扫这个码' }),
       h('div', { class: 'qr-wrap' }, canvas),
       h('div', { class: 'action-row center' }, copyBtn),
       pair.copied ? h('p', { class: 'note center', attrs: { role: 'status' }, text: pair.copied }) : null,
+      // iPhone（#172 F2）：相机扫码会在 Safari 里打开，那一屏会推荐复制链接到主屏幕 App 里连
+      h('p', { class: 'note center', attrs: { id: 'pair-iphone-note' }, text: 'iPhone：扫码后按提示在主屏幕 App 里连接（手机通知只有它能收）。' }),
       codeBox(app),
+      // 新设备扫了，但 Mac 没让它登记上（#172 第二轮复核：比如存不下它的 GitHub 授权）：照实说
+      pairErr ? h('p', { class: 'status is-error', attrs: { role: 'status', id: 'pair-dev-error' }, text: pairErr }) : null,
       h('p', { class: 'waiting', attrs: { role: 'status' } }, h('span', { class: 'breath', attrs: { 'aria-hidden': 'true' } }),
         h('span', { text: `等待新设备…（10 分钟内有效${pair.expiresAt ? `，${F.clock(pair.expiresAt)} 前` : ''}）` })),
       pair.appOn
